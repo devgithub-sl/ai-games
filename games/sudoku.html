@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sudoku Solver</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f0f0f0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            user-select: none;
+        }
+
+        h1 { color: #FF9800; margin-bottom: 10px; }
+
+        .game-container {
+            background: white;
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+
+        #board {
+            display: grid;
+            grid-template-columns: repeat(9, 40px);
+            grid-template-rows: repeat(9, 40px);
+            border: 2px solid #333;
+        }
+
+        .tile {
+            width: 40px;
+            height: 40px;
+            border: 1px solid #ccc;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+            font-weight: bold;
+            cursor: pointer;
+            background-color: white;
+        }
+
+        /* Thick borders for 3x3 grids */
+        .tile:nth-child(3n) { border-right: 2px solid #333; }
+        .tile:nth-child(9n) { border-right: none; } /* End of row handled by grid border */
+        
+        /* We need a specific way to target the bottom borders of the 3x3 grids. 
+           Since it's a flat list of 81 divs, we target specific ranges. */
+        .horizontal-line { border-bottom: 2px solid #333; }
+
+        /* States */
+        .tile-start { 
+            background-color: #eee; 
+            color: #333;
+        }
+        
+        .tile-selected {
+            background-color: #BBDEFB !important;
+        }
+
+        .tile-error {
+            color: red;
+            background-color: #ffcdd2;
+        }
+
+        .tile-correct {
+            color: #4CAF50;
+        }
+
+        /* Number Pad */
+        .digits {
+            margin-top: 15px;
+            display: flex;
+            gap: 5px;
+        }
+
+        .number {
+            width: 35px;
+            height: 35px;
+            border: 1px solid #FF9800;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-weight: bold;
+            color: #FF9800;
+            transition: all 0.2s;
+        }
+
+        .number:hover {
+            background-color: #FF9800;
+            color: white;
+        }
+
+        .btn-row {
+            margin-top: 20px;
+            display: flex;
+            gap: 15px;
+        }
+        
+        button, .btn-link {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            font-size: 1rem;
+            cursor: pointer;
+            text-decoration: none;
+            color: white;
+        }
+
+        .btn-solve { background-color: #FF9800; }
+        .btn-new { background-color: #2196F3; }
+        .btn-back { background-color: #757575; }
+
+        .message { height: 20px; margin-top: 5px; color: #4CAF50; font-weight: bold; }
+
+    </style>
+</head>
+<body>
+
+    <h1>Sudoku</h1>
+    <div id="message" class="message"></div>
+
+    <div class="game-container">
+        <div id="board"></div>
+    </div>
+
+    <div class="digits" id="digits">
+        </div>
+
+    <div class="btn-row">
+        <button class="btn-new" onclick="newGame()">New Game</button>
+        <button class="btn-solve" onclick="validateBoard()">Check</button>
+        <a href="../index.html" class="btn-link btn-back">Back</a>
+    </div>
+
+    <script>
+        const boardElement = document.getElementById("board");
+        const digitsElement = document.getElementById("digits");
+        const messageElement = document.getElementById("message");
+        
+        let board = [];
+        let solution = [];
+        let selectedTile = null;
+        let errors = 0;
+
+        // 1. Initialize Game
+        function newGame() {
+            // Generate full solution
+            solution = generateSudoku();
+            // Create playable board by removing numbers
+            board = removeNumbers([...solution], 40); // Remove 40 numbers
+            
+            drawBoard();
+            drawDigits();
+            messageElement.innerText = "";
+        }
+
+        // 2. Algorithm: Generate Valid Sudoku
+        function generateSudoku() {
+            let grid = Array(81).fill(0);
+            
+            // Fill diagonal 3x3 boxes (independent of each other)
+            fillBox(grid, 0);
+            fillBox(grid, 30);
+            fillBox(grid, 60);
+
+            // Solve the rest
+            solveGrid(grid);
+            return grid;
+        }
+
+        function fillBox(grid, startIdx) {
+            let nums = [1,2,3,4,5,6,7,8,9];
+            nums.sort(() => Math.random() - 0.5); // Shuffle
+            
+            let rowStart = Math.floor(startIdx / 9);
+            let colStart = startIdx % 9;
+
+            let i = 0;
+            for(let r = 0; r < 3; r++) {
+                for(let c = 0; c < 3; c++) {
+                    grid[(rowStart + r) * 9 + (colStart + c)] = nums[i];
+                    i++;
+                }
+            }
+        }
+
+        function solveGrid(grid) {
+            for(let i = 0; i < 81; i++) {
+                if(grid[i] === 0) {
+                    for(let num = 1; num <= 9; num++) {
+                        if(isValid(grid, i, num)) {
+                            grid[i] = num;
+                            if(solveGrid(grid)) return true;
+                            grid[i] = 0; // Backtrack
+                        }
+                    }
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        function isValid(grid, index, num) {
+            let row = Math.floor(index / 9);
+            let col = index % 9;
+            
+            // Row check
+            for(let c = 0; c < 9; c++) if(grid[row * 9 + c] === num) return false;
+            // Col check
+            for(let r = 0; r < 9; r++) if(grid[r * 9 + col] === num) return false;
+            // 3x3 Box check
+            let startRow = row - row % 3;
+            let startCol = col - col % 3;
+            for(let r = 0; r < 3; r++) {
+                for(let c = 0; c < 3; c++) {
+                    if(grid[(startRow + r) * 9 + (startCol + c)] === num) return false;
+                }
+            }
+            return true;
+        }
+
+        function removeNumbers(grid, count) {
+            let newGrid = [...grid];
+            let attempts = count;
+            while(attempts > 0) {
+                let idx = Math.floor(Math.random() * 81);
+                if(newGrid[idx] !== 0) {
+                    newGrid[idx] = 0;
+                    attempts--;
+                }
+            }
+            return newGrid;
+        }
+
+        // 3. UI Functions
+        function drawBoard() {
+            boardElement.innerHTML = "";
+            for(let i=0; i<81; i++) {
+                let tile = document.createElement("div");
+                tile.id = i;
+                tile.classList.add("tile");
+                
+                // Add horizontal border for 3x3 visual
+                let row = Math.floor(i / 9);
+                if (row === 2 || row === 5) tile.classList.add("horizontal-line");
+
+                if(board[i] !== 0) {
+                    tile.innerText = board[i];
+                    tile.classList.add("tile-start");
+                } else {
+                    tile.addEventListener("click", selectTile);
+                }
+                boardElement.appendChild(tile);
+            }
+        }
+
+        function drawDigits() {
+            digitsElement.innerHTML = "";
+            for(let i=1; i<=9; i++) {
+                let num = document.createElement("div");
+                num.classList.add("number");
+                num.innerText = i;
+                num.addEventListener("click", () => inputNumber(i));
+                digitsElement.appendChild(num);
+            }
+        }
+
+        function selectTile() {
+            if(selectedTile) selectedTile.classList.remove("tile-selected");
+            selectedTile = this;
+            selectedTile.classList.add("tile-selected");
+        }
+
+        function inputNumber(num) {
+            if(selectedTile) {
+                selectedTile.innerText = num;
+                // Check immediate correctness (optional, but good for feedback)
+                // Remove 'tile-error' to reset
+                selectedTile.classList.remove("tile-error");
+                
+                // Update board state
+                board[selectedTile.id] = num;
+            }
+        }
+
+        function validateBoard() {
+            let isFull = true;
+            let isCorrect = true;
+
+            // Simple check against the generated solution
+            for(let i=0; i<81; i++) {
+                let tile = document.getElementById(i);
+                
+                if(board[i] === 0) {
+                    isFull = false;
+                } else if(board[i] !== solution[i]) {
+                    if(!tile.classList.contains("tile-start")) {
+                        tile.classList.add("tile-error");
+                    }
+                    isCorrect = false;
+                }
+            }
+
+            if(isCorrect && isFull) {
+                messageElement.innerText = "Puzzle Solved!";
+            } else if (!isFull) {
+                 messageElement.innerText = "Finish the board first.";
+            } else {
+                messageElement.innerText = "Errors found (marked in red).";
+            }
+        }
+
+        // Keyboard support
+        document.addEventListener("keydown", (e) => {
+            if(e.key >= 1 && e.key <= 9) {
+                inputNumber(parseInt(e.key));
+            }
+        });
+
+        // Init
+        newGame();
+
+    </script>
+</body>
+</html>

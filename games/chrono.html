@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chrono Stack</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Courier New', Courier, monospace; }
+        
+        #ui {
+            position: absolute;
+            top: 20px; left: 20px;
+            color: #0ff;
+            text-shadow: 0 0 5px #0ff;
+            pointer-events: none;
+        }
+
+        h1 { margin: 0; text-transform: uppercase; font-size: 2rem; }
+        p { margin: 5px 0; font-size: 1.2rem; color: #aaa; }
+        
+        .key {
+            color: #fff; background: #333; padding: 2px 6px; border-radius: 4px; border: 1px solid #555;
+        }
+
+        #message {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            display: none;
+        }
+
+        #message h2 { font-size: 3rem; color: #0f0; text-shadow: 0 0 20px #0f0; margin: 0; }
+        
+        button {
+            margin-top: 20px;
+            padding: 10px 30px;
+            background: transparent; border: 2px solid #0ff; color: #0ff;
+            font-size: 1.5rem; cursor: pointer; pointer-events: auto;
+            text-transform: uppercase;
+        }
+        button:hover { background: #0ff; color: #000; }
+
+        .btn-back {
+            position: absolute; bottom: 20px; left: 20px;
+            text-decoration: none; color: #555; border: 1px solid #555; padding: 8px 16px;
+            pointer-events: auto; transition: 0.2s;
+        }
+        .btn-back:hover { color: white; border-color: white; }
+
+        #target-indicator {
+            position: absolute; top: 20px; right: 20px;
+            font-size: 1.5rem; color: #ffd700;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui">
+        <h1>CHRONO STACK</h1>
+        <p>Goal: Reach the <span style="color:#ffd700">GOLD DATA CORE</span></p>
+        <p>Controls: <span class="key">WASD</span> Move | <span class="key">SPACE</span> Lock Timeline</p>
+        <p>Ghosts Used: <span id="ghost-count" style="color: white">0</span></p>
+    </div>
+
+    <div id="target-indicator">TARGET HEIGHT: <span id="height-dist">0</span>m</div>
+
+    <div id="message">
+        <h2 id="msg-title">SEQUENCE COMPLETE</h2>
+        <button onclick="nextLevel()">NEXT ITERATION</button>
+    </div>
+
+    <a href="../index.html" class="btn-back">EXIT SIMULATION</a>
+
+    <script>
+        // --- SETUP ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x050510);
+        scene.fog = new THREE.FogExp2(0x050510, 0.02);
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        // Lights
+        const ambientLight = new THREE.AmbientLight(0x404040); // Soft white light
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(10, 20, 10);
+        dirLight.castShadow = true;
+        scene.add(dirLight);
+
+        // --- GAME OBJECTS ---
+        
+        // Floor
+        const floorGeo = new THREE.PlaneGeometry(100, 100);
+        const floorMat = new THREE.MeshStandardMaterial({ 
+            color: 0x111122, 
+            roughness: 0.8,
+            metalness: 0.2
+        });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        floor.receiveShadow = true;
+        scene.add(floor);
+
+        // Grid Helper
+        const gridHelper = new THREE.GridHelper(100, 50, 0x00ffff, 0x222222);
+        scene.add(gridHelper);
+
+        // The Player
+        const playerGeo = new THREE.BoxGeometry(1, 1, 1);
+        const playerMat = new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x004444 });
+        const player = new THREE.Mesh(playerGeo, playerMat);
+        player.castShadow = true;
+        scene.add(player);
+
+        // The Goal (Floating Gold Cube)
+        const goalGeo = new THREE.OctahedronGeometry(0.8);
+        const goalMat = new THREE.MeshStandardMaterial({ color: 0xffd700, emissive: 0xffaa00, wireframe: true });
+        const goal = new THREE.Mesh(goalGeo, goalMat);
+        goal.position.set(0, 5, -5); // Level 1 position
+        
+        // Goal Light
+        const goalLight = new THREE.PointLight(0xffd700, 1, 10);
+        goal.add(goalLight);
+        scene.add(goal);
+
+        // Ghosts Array (The solid platforms)
+        let ghosts = [];
+        let ghostMeshes = [];
+
+        // Game State
+        let velocity = new THREE.Vector3();
+        let direction = new THREE.Vector3();
+        let onGround = true;
+        let canJump = false; // We don't jump, we lock. But let's add small hop.
+        let level = 1;
+        
+        // Physics Consts
+        const SPEED = 0.15;
+        const GRAVITY = 0.02;
+        const JUMP_FORCE = 0.4;
+
+        // Inputs
+        const keys = { w: false, a: false, s: false, d: false, space: false };
+        
+        document.addEventListener('keydown', (e) => {
+            const key = e.key.toLowerCase();
+            if (keys.hasOwnProperty(key)) keys[key] = true;
+            if (e.code === 'Space') handleSpace();
+        });
+
+        document.addEventListener('keyup', (e) => {
+            const key = e.key.toLowerCase();
+            if (keys.hasOwnProperty(key)) keys[key] = false;
+        });
+
+        function handleSpace() {
+            // "Lock" the timeline
+            // 1. Create a ghost at current position
+            createGhost(player.position.clone());
+            
+            // 2. Respawn player
+            respawn();
+        }
+
+        function createGhost(pos) {
+            // Visual
+            const geo = new THREE.BoxGeometry(1, 1, 1);
+            // Ghosts look like dark glass/obsidian
+            const mat = new THREE.MeshStandardMaterial({ 
+                color: 0x444444, 
+                transparent: true, 
+                opacity: 0.8,
+                roughness: 0.1
+            });
+            const ghost = new THREE.Mesh(geo, mat);
+            ghost.position.copy(pos);
+            ghost.castShadow = true;
+            ghost.receiveShadow = true;
+            
+            // Add a glowing outline
+            const edges = new THREE.EdgesGeometry(geo);
+            const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x00ffff }));
+            ghost.add(line);
+
+            scene.add(ghost);
+            ghostMeshes.push(ghost);
+            
+            // Physics data (Simple AABB)
+            ghosts.push(new THREE.Box3().setFromObject(ghost));
+
+            // UI Update
+            document.getElementById('ghost-count').innerText = ghosts.length;
+        }
+
+        function respawn() {
+            player.position.set(0, 0.5, 5); // Start position
+            velocity.set(0, 0, 0);
+            
+            // Visual feedback
+            player.material.color.setHex(0xffffff);
+            setTimeout(() => player.material.color.setHex(0x00ffff), 200);
+        }
+
+        function checkCollision(newPos) {
+            // Player Bounding Box
+            const playerBox = new THREE.Box3().setFromCenterAndSize(newPos, new THREE.Vector3(0.9, 0.9, 0.9));
+
+            // Check against all ghosts
+            for (let box of ghosts) {
+                if (playerBox.intersectsBox(box)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        function checkGround(newPos) {
+            // Check if we are standing on a ghost
+            // We lower the box slightly to check beneath feet
+            const feetPos = newPos.clone();
+            feetPos.y -= 0.1;
+            const playerBox = new THREE.Box3().setFromCenterAndSize(feetPos, new THREE.Vector3(0.8, 0.9, 0.8));
+
+            for (let box of ghosts) {
+                if (playerBox.intersectsBox(box)) {
+                    // Make sure we are above it, not inside it
+                    if (newPos.y > box.max.y) {
+                        return { isGrounded: true, y: box.max.y + 0.5 };
+                    }
+                }
+            }
+            
+            // Check Floor
+            if (newPos.y <= 0.5) return { isGrounded: true, y: 0.5 };
+
+            return { isGrounded: false, y: 0 };
+        }
+
+        function checkWin() {
+            const dist = player.position.distanceTo(goal.position);
+            if (dist < 1.5) {
+                document.getElementById('message').style.display = 'block';
+                // Rotate goal wildly
+                goal.rotation.x += 0.5;
+            }
+        }
+
+        function nextLevel() {
+            level++;
+            
+            // Clear ghosts
+            ghostMeshes.forEach(g => scene.remove(g));
+            ghostMeshes = [];
+            ghosts = [];
+            document.getElementById('ghost-count').innerText = '0';
+
+            document.getElementById('message').style.display = 'none';
+
+            // Increase Difficulty (Higher Goal)
+            // Level 1: Height 5
+            // Level 2: Height 10
+            // Level 3: Height 16
+            goal.position.set(0, 4 + (level * 5), -5);
+            
+            respawn();
+        }
+
+        function update() {
+            // 1. Movement Input
+            direction.set(0, 0, 0);
+            if (keys.w) direction.z = -1;
+            if (keys.s) direction.z = 1;
+            if (keys.a) direction.x = -1;
+            if (keys.d) direction.x = 1;
+            direction.normalize();
+
+            // 2. Apply Velocity
+            if (direction.length() > 0) {
+                // Determine forward relative to camera
+                // Simple version: Camera is fixed angle, so inputs are absolute world
+                velocity.x = direction.x * SPEED;
+                velocity.z = direction.z * SPEED;
+            } else {
+                velocity.x = 0;
+                velocity.z = 0;
+            }
+
+            // 3. Apply Gravity
+            velocity.y -= GRAVITY;
+
+            // 4. Proposed Position X/Z (Horizontal)
+            let proposedPos = player.position.clone();
+            proposedPos.x += velocity.x;
+            proposedPos.z += velocity.z;
+
+            // Horizontal Collision Check
+            if (!checkCollision(proposedPos)) {
+                player.position.x = proposedPos.x;
+                player.position.z = proposedPos.z;
+            }
+
+            // 5. Proposed Position Y (Vertical)
+            proposedPos = player.position.clone();
+            proposedPos.y += velocity.y;
+
+            // Vertical Collision / Ground Check
+            // A. Check if hitting head on ghost (going up)
+            if (velocity.y > 0 && checkCollision(proposedPos)) {
+                velocity.y = 0; // Bonk head
+            } 
+            // B. Check if landing on ghost/floor (going down)
+            else {
+                const groundInfo = checkGround(proposedPos);
+                if (velocity.y < 0 && groundInfo.isGrounded) {
+                    player.position.y = groundInfo.y;
+                    velocity.y = 0;
+                    onGround = true;
+                    
+                    // Auto Jump? No, we need to stack.
+                    // But let's add a small jump if W is pressed against a wall? 
+                    // No, keeping it strict: You must STACK.
+                    
+                    // Actually, let's allow a small jump (1 block high) so you don't need 100 ghosts
+                    if (keys.space) {
+                        // Wait, space is lock. 
+                        // Let's make it so you just walk.
+                        // To get higher, you must lock at the PEAK of your jump.
+                        // Wait, how do you jump?
+                        // Let's add Jump on SHIFT or just make SPACE jump, and 'E' or 'ENTER' lock?
+                        // Original prompt said: "You jump and freeze".
+                    }
+                } else {
+                    player.position.y = proposedPos.y;
+                    onGround = false;
+                }
+            }
+            
+            // Hard floor clamp just in case
+            if (player.position.y < 0.5) {
+                player.position.y = 0.5;
+                velocity.y = 0;
+                onGround = true;
+            }
+
+            // Add a JUMP mechanic to make stacking easier
+            // Let's remap: Space is JUMP. 'F' is FREEZE/LOCK.
+            if (keys.space && onGround) {
+                // velocity.y = JUMP_FORCE; 
+                // Actually, the prompt was "You are your own staircase".
+                // If we allow jumping, it's just a normal platformer.
+                // The constraint is: You can JUMP, but not high enough.
+                // Let's enable jump.
+                velocity.y = JUMP_FORCE;
+                onGround = false;
+                
+                // Hack: Reset key so we don't spam jump, but we need 'space' for lock in the prompt.
+                // Let's stick to the screen instructions: Space is LOCK.
+                // We need an AUTO-JUMP or a separate key. 
+                // Let's make: SPACE = Jump. ENTER = Lock.
+            }
+
+            // 6. Camera Follow
+            // Isometric-ish view
+            camera.position.x = player.position.x + 10;
+            camera.position.y = player.position.y + 10;
+            camera.position.z = player.position.z + 10;
+            camera.lookAt(player.position);
+
+            // 7. Goal Animation
+            goal.rotation.y += 0.02;
+            goal.rotation.z += 0.01;
+            
+            // Distance UI
+            const distY = Math.max(0, goal.position.y - player.position.y).toFixed(1);
+            document.getElementById('height-dist').innerText = distY;
+
+            checkWin();
+        }
+
+        // Remap keys for better playability based on physics logic
+        // SPACE = JUMP
+        // ENTER (or F) = LOCK
+        
+        document.querySelector('.key:nth-child(2)').innerText = "SPACE to Jump | F to Lock";
+        
+        document.addEventListener('keydown', (e) => {
+             if (e.code === 'Space') {
+                 // Jump logic handled in loop
+                 keys.space = true;
+             }
+             if (e.code === 'KeyF') {
+                 handleSpace(); // Reuse the lock logic
+             }
+        });
+        document.addEventListener('keyup', (e) => {
+            if (e.code === 'Space') keys.space = false;
+        });
+
+
+        // --- ANIMATION LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+            update();
+            renderer.render(scene, camera);
+        }
+        
+        // Initial Respawn
+        respawn();
+        animate();
+
+        // Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+    </script>
+</body>
+</html>

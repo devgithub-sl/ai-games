@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Memory Match</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f0f0f0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+
+        h1 { color: #673ab7; margin-bottom: 10px; }
+
+        .stats-bar {
+            display: flex;
+            gap: 20px;
+            font-size: 1.2rem;
+            margin-bottom: 20px;
+            color: #333;
+        }
+
+        .game-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 100px);
+            grid-template-rows: repeat(4, 100px);
+            gap: 10px;
+            perspective: 1000px; /* Essential for 3D flip effect */
+        }
+
+        /* Card Container */
+        .card {
+            background-color: transparent;
+            width: 100%;
+            height: 100%;
+            cursor: pointer;
+            position: relative;
+            transform-style: preserve-3d;
+            transition: transform 0.5s;
+        }
+
+        /* The Flip Action */
+        .card.flip {
+            transform: rotateY(180deg);
+        }
+
+        /* Front and Back common styles */
+        .front-face, .back-face {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            border-radius: 8px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 3rem;
+            backface-visibility: hidden; /* Hides the back when flipped */
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        /* Front Face (The Content/Emoji) - Initially hidden by rotation */
+        .front-face {
+            background-color: white;
+            transform: rotateY(180deg);
+            border: 2px solid #009688;
+        }
+
+        /* Back Face (The Cover) - Initially visible */
+        .back-face {
+            background-color: #673ab7;
+            color: white;
+            font-size: 2rem;
+        }
+
+        .btn-container {
+            margin-top: 30px;
+            display: flex;
+            gap: 15px;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            font-size: 1rem;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            text-decoration: none;
+            color: white;
+        }
+
+        .btn-restart { background-color: #009688; }
+        .btn-restart:hover { background-color: #00796b; }
+
+        .btn-back { background-color: #757575; }
+        .btn-back:hover { background-color: #616161; }
+
+        /* Mobile Responsive */
+        @media (max-width: 500px) {
+            .game-grid {
+                grid-template-columns: repeat(4, 70px);
+                grid-template-rows: repeat(4, 70px);
+            }
+            .front-face { font-size: 2rem; }
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Memory Match</h1>
+    
+    <div class="stats-bar">
+        <span>Moves: <b id="move-count">0</b></span>
+        <span>Time: <b id="time-count">00:00</b></span>
+    </div>
+
+    <div class="game-grid" id="grid">
+        </div>
+
+    <div class="btn-container">
+        <button class="btn btn-restart" onclick="restartGame()">Restart</button>
+        <a href="../index.html" class="btn btn-back">Back to Arcade</a>
+    </div>
+
+    <script>
+        const grid = document.getElementById('grid');
+        const moveEl = document.getElementById('move-count');
+        const timeEl = document.getElementById('time-count');
+
+        // Game State
+        const emojis = ['🍕', '🍕', '🚀', '🚀', '🐱', '🐱', '🌵', '🌵', '🎸', '🎸', '💎', '💎', '🍦', '🍦', '🎈', '🎈'];
+        let cards = [];
+        let hasFlippedCard = false;
+        let lockBoard = false;
+        let firstCard, secondCard;
+        let moves = 0;
+        let timerInterval;
+        let seconds = 0;
+        let gameStarted = false;
+
+        function shuffle(array) {
+            array.sort(() => 0.5 - Math.random());
+        }
+
+        function createBoard() {
+            grid.innerHTML = '';
+            shuffle(emojis);
+            emojis.forEach(emoji => {
+                // Create Card HTML Structure
+                const card = document.createElement('div');
+                card.classList.add('card');
+                card.dataset.emoji = emoji; // Store value for matching logic
+
+                const frontFace = document.createElement('div');
+                frontFace.classList.add('front-face');
+                frontFace.innerHTML = emoji;
+
+                const backFace = document.createElement('div');
+                backFace.classList.add('back-face');
+                backFace.innerHTML = '?';
+
+                card.appendChild(frontFace);
+                card.appendChild(backFace);
+                
+                card.addEventListener('click', flipCard);
+                grid.appendChild(card);
+            });
+        }
+
+        function flipCard() {
+            if (lockBoard) return;
+            if (this === firstCard) return; // Prevent double clicking same card
+
+            if (!gameStarted) {
+                startTimer();
+                gameStarted = true;
+            }
+
+            this.classList.add('flip');
+
+            if (!hasFlippedCard) {
+                // First click
+                hasFlippedCard = true;
+                firstCard = this;
+                return;
+            }
+
+            // Second click
+            secondCard = this;
+            incrementMoves();
+            checkForMatch();
+        }
+
+        function checkForMatch() {
+            let isMatch = firstCard.dataset.emoji === secondCard.dataset.emoji;
+            isMatch ? disableCards() : unflipCards();
+        }
+
+        function disableCards() {
+            // It's a match! Remove event listeners so they can't be clicked again
+            firstCard.removeEventListener('click', flipCard);
+            secondCard.removeEventListener('click', flipCard);
+            
+            resetBoard();
+            
+            // Check for Win (all cards flipped)
+            if (document.querySelectorAll('.flip').length === emojis.length) {
+                clearInterval(timerInterval);
+                setTimeout(() => alert(`You won in ${moves} moves and ${timeEl.innerText}!`), 500);
+            }
+        }
+
+        function unflipCards() {
+            lockBoard = true; // Prevent clicking others while waiting
+            setTimeout(() => {
+                firstCard.classList.remove('flip');
+                secondCard.classList.remove('flip');
+                resetBoard();
+            }, 1000);
+        }
+
+        function resetBoard() {
+            [hasFlippedCard, lockBoard] = [false, false];
+            [firstCard, secondCard] = [null, null];
+        }
+
+        function incrementMoves() {
+            moves++;
+            moveEl.innerText = moves;
+        }
+
+        function startTimer() {
+            clearInterval(timerInterval);
+            seconds = 0;
+            timerInterval = setInterval(() => {
+                seconds++;
+                let mins = Math.floor(seconds / 60);
+                let secs = seconds % 60;
+                // Format: 00:00
+                timeEl.innerText = 
+                    (mins < 10 ? '0' + mins : mins) + ':' + 
+                    (secs < 10 ? '0' + secs : secs);
+            }, 1000);
+        }
+
+        function restartGame() {
+            clearInterval(timerInterval);
+            seconds = 0;
+            moves = 0;
+            moveEl.innerText = '0';
+            timeEl.innerText = '00:00';
+            gameStarted = false;
+            [hasFlippedCard, lockBoard] = [false, false];
+            [firstCard, secondCard] = [null, null];
+            createBoard();
+        }
+
+        // Initialize
+        createBoard();
+
+    </script>
+</body>
+</html>

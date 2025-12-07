@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cyber Defense</title>
+    <style>
+        body {
+            background-color: #000;
+            color: #0f0; /* Matrix Green */
+            font-family: 'Courier New', Courier, monospace;
+            text-align: center;
+            margin: 0;
+            cursor: crosshair; /* Target reticle cursor */
+            overflow: hidden;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        h1 {
+            font-size: 3rem;
+            margin-bottom: 0;
+            text-shadow: 0 0 10px #0f0;
+            text-transform: uppercase;
+        }
+
+        .stats {
+            display: flex;
+            gap: 40px;
+            font-size: 1.5rem;
+            margin: 20px 0;
+        }
+
+        /* The Server Rack (Grid) */
+        .game-grid {
+            width: 600px;
+            height: 400px;
+            display: flex;
+            flex-wrap: wrap;
+            margin: 0 auto;
+        }
+
+        .server-slot {
+            flex: 1 0 33.33%; /* 3 columns */
+            height: 130px; /* roughly 1/3 of height */
+            position: relative;
+            overflow: hidden;
+            border: 1px solid #003300;
+            background: #001100;
+        }
+
+        /* The "Hole" visual (A server port) */
+        .server-slot:after {
+            content: '[ PORT OPEN ]';
+            display: block;
+            position: absolute;
+            bottom: 5px;
+            width: 100%;
+            text-align: center;
+            font-size: 0.8rem;
+            color: #005500;
+            pointer-events: none; /* Let clicks pass through */
+        }
+
+        /* The Virus (The Mole) */
+        .virus {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 100%; /* Hidden below the slot */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 4rem;
+            transition: top 0.1s; /* Fast pop up */
+            user-select: none;
+            cursor: cell; /* Changes cursor on hover */
+        }
+
+        .virus.up {
+            top: 0; /* Visible */
+        }
+
+        /* Virus Styles */
+        .bug {
+            filter: drop-shadow(0 0 10px red);
+        }
+
+        /* Explosion effect when clicked */
+        .bonked {
+            transform: scale(0.8);
+            filter: grayscale(100%);
+        }
+
+        /* UI Buttons */
+        button {
+            background: #000;
+            color: #0f0;
+            border: 2px solid #0f0;
+            padding: 10px 30px;
+            font-family: inherit;
+            font-size: 1.2rem;
+            cursor: pointer;
+            text-transform: uppercase;
+            margin-top: 20px;
+            transition: all 0.2s;
+        }
+
+        button:hover {
+            background: #0f0;
+            color: black;
+            box-shadow: 0 0 20px #0f0;
+        }
+
+        .btn-back {
+            display: inline-block;
+            margin-top: 15px;
+            color: #005500;
+            text-decoration: none;
+            border: 1px solid #005500;
+            padding: 5px 10px;
+        }
+        .btn-back:hover { color: #0f0; border-color: #0f0; }
+
+        /* CRT Scanline Overlay */
+        .scanlines {
+            position: absolute;
+            top:0; left:0; width:100%; height:100%;
+            background: repeating-linear-gradient(
+                to bottom,
+                transparent,
+                transparent 2px,
+                rgba(0, 255, 0, 0.05) 3px
+            );
+            pointer-events: none;
+        }
+
+    </style>
+</head>
+<body>
+
+    <div class="scanlines"></div>
+
+    <h1>CYBER DEFENSE</h1>
+    
+    <div class="stats">
+        <span>THREATS STOPPED: <span id="score">0</span></span>
+        <span>SYSTEM INTEGRITY: <span id="time">100</span>%</span>
+    </div>
+
+    <div class="game-grid">
+        <div class="server-slot"><div class="virus">👾</div></div>
+        <div class="server-slot"><div class="virus">👾</div></div>
+        <div class="server-slot"><div class="virus">👾</div></div>
+        <div class="server-slot"><div class="virus">👾</div></div>
+        <div class="server-slot"><div class="virus">👾</div></div>
+        <div class="server-slot"><div class="virus">👾</div></div>
+    </div>
+
+    <button onclick="startGame()">INITIATE FIREWALL</button>
+    <br>
+    <a href="../index.html" class="btn-back">LOGOUT</a>
+
+    <script>
+        const holes = document.querySelectorAll('.server-slot');
+        const scoreBoard = document.querySelector('#score');
+        const timerBoard = document.querySelector('#time');
+        const viruses = document.querySelectorAll('.virus');
+        
+        let lastHole;
+        let timeUp = false;
+        let score = 0;
+        let integrity = 100;
+        let integrityInterval;
+
+        // Utility: Get Random Time
+        function randomTime(min, max) {
+            return Math.round(Math.random() * (max - min) + min);
+        }
+
+        // Utility: Get Random Slot
+        function randomHole(holes) {
+            const idx = Math.floor(Math.random() * holes.length);
+            const hole = holes[idx];
+            if (hole === lastHole) {
+                return randomHole(holes);
+            }
+            lastHole = hole;
+            return hole;
+        }
+
+        // The Main Mechanic: Pop up a virus
+        function peep() {
+            // As score increases, game gets faster
+            const speedBase = Math.max(200, 1000 - (score * 20)); 
+            const speedMax = Math.max(500, 2000 - (score * 20));
+            
+            const time = randomTime(speedBase, speedMax);
+            const hole = randomHole(holes);
+            const virusElement = hole.querySelector('.virus');
+            
+            // Random visual (Bug or Skull)
+            virusElement.innerText = Math.random() > 0.8 ? '☠️' : '👾';
+            
+            virusElement.classList.add('up');
+
+            // If virus stays up too long, you lose integrity (health)
+            let damageTimeout = setTimeout(() => {
+                if(timeUp) return;
+                // If it goes down naturally (wasn't clicked), take damage
+                integrity -= 5;
+                timerBoard.innerText = integrity;
+                checkGameOver();
+            }, time);
+
+            setTimeout(() => {
+                virusElement.classList.remove('up');
+                if (!timeUp) peep();
+            }, time);
+        }
+
+        function startGame() {
+            // Reset
+            scoreBoard.textContent = 0;
+            timerBoard.textContent = 100;
+            timeUp = false;
+            score = 0;
+            integrity = 100;
+            
+            // Start
+            peep();
+            
+            // Game ends if integrity hits 0, not by time
+        }
+
+        function bonk(e) {
+            if(!e.isTrusted) return; // Cheater detection
+            
+            // Visual feedback
+            this.innerText = '💥'; 
+            this.classList.remove('up');
+            
+            score++;
+            scoreBoard.textContent = score;
+        }
+        
+        function checkGameOver() {
+            if (integrity <= 0) {
+                timeUp = true;
+                timerBoard.innerText = "0 - CRITICAL FAILURE";
+                alert(`SYSTEM COMPROMISED.\nThreats Neutralized: ${score}`);
+            }
+        }
+
+        viruses.forEach(virus => virus.addEventListener('mousedown', bonk));
+
+    </script>
+</body>
+</html>

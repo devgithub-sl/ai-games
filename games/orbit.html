@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Orbital Guard</title>
+    <style>
+        body {
+            background-color: #050510;
+            margin: 0;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            color: #fff;
+            font-family: 'Segoe UI', sans-serif;
+        }
+
+        #game-container {
+            position: relative;
+            box-shadow: 0 0 50px rgba(0, 100, 255, 0.2);
+            border-radius: 50%; /* Circular container look */
+        }
+
+        canvas {
+            display: block;
+            border-radius: 50%;
+            background: radial-gradient(circle at center, #1a1a2e 0%, #000 100%);
+        }
+
+        #ui-layer {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 1.5rem;
+            text-shadow: 0 0 10px #4deeea;
+            pointer-events: none;
+        }
+
+        #screens {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            z-index: 10;
+        }
+
+        h1 {
+            font-size: 3rem;
+            margin: 0;
+            color: #4deeea;
+            text-transform: uppercase;
+            letter-spacing: 3px;
+            text-shadow: 0 0 20px #4deeea;
+        }
+
+        p { color: #aaa; margin-bottom: 20px; }
+
+        button {
+            background: transparent;
+            color: #4deeea;
+            border: 2px solid #4deeea;
+            padding: 10px 30px;
+            font-size: 1.2rem;
+            cursor: pointer;
+            border-radius: 30px;
+            transition: 0.2s;
+            text-transform: uppercase;
+        }
+
+        button:hover {
+            background: #4deeea;
+            color: #000;
+            box-shadow: 0 0 20px #4deeea;
+        }
+
+        .btn-back {
+            display: inline-block;
+            margin-top: 15px;
+            color: #555;
+            text-decoration: none;
+            font-size: 0.9rem;
+        }
+        .btn-back:hover { color: #fff; }
+
+        #health-ring {
+            position: absolute;
+            top: 50%; left: 50%;
+            width: 60px; height: 60px;
+            transform: translate(-50%, -50%);
+            border-radius: 50%;
+            box-shadow: 0 0 20px #4deeea;
+            background: #4deeea;
+            z-index: 1;
+            transition: background 0.2s, transform 0.1s;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <canvas id="gameCanvas" width="600" height="600"></canvas>
+        <div id="health-ring"></div>
+        
+        <div id="ui-layer">WAVE: <span id="score">1</span></div>
+
+        <div id="screens">
+            <div id="start-screen">
+                <h1>Orbital<br>Guard</h1>
+                <p>Use LEFT / RIGHT Arrows to Rotate Shield</p>
+                <button onclick="startGame()">Engage Defense</button>
+                <br>
+                <a href="../index.html" class="btn-back">Abort</a>
+            </div>
+            <div id="game-over-screen" style="display: none;">
+                <h1 style="color: #ff2a6d; text-shadow: 0 0 20px #ff2a6d;">SYSTEM BREACH</h1>
+                <p>Final Wave: <span id="final-score">0</span></p>
+                <button onclick="startGame()">Reboot</button>
+                <br>
+                <a href="../index.html" class="btn-back">Abort</a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreEl = document.getElementById('score');
+        const finalScoreEl = document.getElementById('final-score');
+        const startScreen = document.getElementById('start-screen');
+        const gameOverScreen = document.getElementById('game-over-screen');
+        const healthRing = document.getElementById('health-ring');
+
+        // Game State
+        let gameRunning = false;
+        let score = 0; // Tracks Waves survived
+        let health = 100;
+        let centerX = canvas.width / 2;
+        let centerY = canvas.height / 2;
+        
+        // Entities
+        const shield = {
+            angle: 0, // In Radians
+            radius: 80,
+            arcLength: Math.PI / 2, // 90 degrees wide
+            speed: 0.15,
+            color: '#4deeea'
+        };
+
+        const enemies = [];
+        const particles = [];
+        
+        // Input
+        const keys = { ArrowLeft: false, ArrowRight: false };
+
+        class Enemy {
+            constructor(speedMultiplier) {
+                this.angle = Math.random() * Math.PI * 2;
+                this.distance = 350; // Spawn outside
+                this.speed = (Math.random() * 1 + 1) * speedMultiplier;
+                this.radius = 8;
+                this.color = '#ff2a6d';
+            }
+
+            update() {
+                this.distance -= this.speed;
+            }
+
+            draw() {
+                const x = centerX + Math.cos(this.angle) * this.distance;
+                const y = centerY + Math.sin(this.angle) * this.distance;
+                
+                ctx.beginPath();
+                ctx.arc(x, y, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = this.color;
+                ctx.shadowBlur = 10;
+                ctx.shadowColor = this.color;
+                ctx.fill();
+                ctx.shadowBlur = 0;
+            }
+        }
+
+        class Particle {
+            constructor(x, y, color) {
+                this.x = x;
+                this.y = y;
+                this.color = color;
+                this.size = Math.random() * 3 + 2;
+                this.speedX = (Math.random() - 0.5) * 5;
+                this.speedY = (Math.random() - 0.5) * 5;
+                this.life = 1.0;
+            }
+            update() {
+                this.x += this.speedX;
+                this.y += this.speedY;
+                this.life -= 0.05;
+            }
+            draw() {
+                ctx.globalAlpha = this.life;
+                ctx.fillStyle = this.color;
+                ctx.fillRect(this.x, this.y, this.size, this.size);
+                ctx.globalAlpha = 1.0;
+            }
+        }
+
+        function spawnEnemy() {
+            // Spawn rate increases with score
+            if (Math.random() < 0.02 + (score * 0.001)) {
+                enemies.push(new Enemy(1 + (score * 0.1)));
+            }
+        }
+
+        function checkCollisions() {
+            for (let i = 0; i < enemies.length; i++) {
+                let e = enemies[i];
+                
+                // 1. Check Shield Collision
+                // If enemy distance is roughly equal to shield radius
+                if (e.distance < shield.radius + 10 && e.distance > shield.radius - 10) {
+                    
+                    // Normalize angles to 0 - 2PI range for comparison
+                    let eAngle = (e.angle % (Math.PI * 2));
+                    if (eAngle < 0) eAngle += Math.PI * 2;
+                    
+                    let sAngle = (shield.angle % (Math.PI * 2));
+                    if (sAngle < 0) sAngle += Math.PI * 2;
+
+                    // Calculate difference
+                    let diff = Math.abs(eAngle - sAngle);
+                    if (diff > Math.PI) diff = (Math.PI * 2) - diff; // Handle wrap-around case
+
+                    // Check if within arc
+                    if (diff < shield.arcLength / 2) {
+                        // HIT SHIELD
+                        createExplosion(e.distance, e.angle, '#4deeea');
+                        enemies.splice(i, 1);
+                        i--;
+                        continue;
+                    }
+                }
+
+                // 2. Check Core Collision
+                if (e.distance <= 30) {
+                    // HIT CORE
+                    createExplosion(30, e.angle, '#ff2a6d');
+                    enemies.splice(i, 1);
+                    i--;
+                    damageCore();
+                }
+            }
+        }
+
+        function createExplosion(dist, angle, color) {
+            const x = centerX + Math.cos(angle) * dist;
+            const y = centerY + Math.sin(angle) * dist;
+            for(let i=0; i<10; i++) {
+                particles.push(new Particle(x, y, color));
+            }
+        }
+
+        function damageCore() {
+            health -= 25;
+            // Visual Shake
+            document.body.style.transform = `translate(${Math.random()*10-5}px, ${Math.random()*10-5}px)`;
+            setTimeout(() => document.body.style.transform = 'none', 50);
+
+            // Change Core Color
+            healthRing.style.background = '#ff2a6d';
+            healthRing.style.boxShadow = '0 0 20px #ff2a6d';
+            setTimeout(() => {
+                healthRing.style.background = '#4deeea';
+                healthRing.style.boxShadow = '0 0 20px #4deeea';
+            }, 200);
+
+            if (health <= 0) {
+                gameOver();
+            }
+        }
+
+        function update() {
+            if (!gameRunning) return;
+
+            // Clear Canvas
+            ctx.fillStyle = 'rgba(5, 5, 16, 0.3)'; // Trail effect
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw Radar Grid
+            ctx.strokeStyle = '#1a1a2e';
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.arc(centerX, centerY, 150, 0, Math.PI*2); ctx.stroke();
+            ctx.beginPath(); ctx.arc(centerX, centerY, 250, 0, Math.PI*2); ctx.stroke();
+
+            // Rotate Shield
+            if (keys.ArrowLeft) shield.angle -= shield.speed;
+            if (keys.ArrowRight) shield.angle += shield.speed;
+
+            // Draw Shield
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, shield.radius, shield.angle - shield.arcLength/2, shield.angle + shield.arcLength/2);
+            ctx.strokeStyle = shield.color;
+            ctx.lineWidth = 8;
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = shield.color;
+            ctx.lineCap = 'round';
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+
+            // Update Entities
+            spawnEnemy();
+            
+            enemies.forEach(e => {
+                e.update();
+                e.draw();
+            });
+
+            particles.forEach((p, idx) => {
+                p.update();
+                p.draw();
+                if (p.life <= 0) particles.splice(idx, 1);
+            });
+
+            checkCollisions();
+            
+            // Score based on time/frames (simulated "Waves")
+            if (frames % 600 === 0 && frames > 0) {
+                score++;
+                scoreEl.innerText = score;
+                // Flash wave text
+                scoreEl.style.color = '#fff';
+                setTimeout(() => scoreEl.style.color = '#4deeea', 500);
+            }
+
+            frames++;
+            requestAnimationFrame(update);
+        }
+
+        function startGame() {
+            enemies.length = 0;
+            particles.length = 0;
+            health = 100;
+            score = 1;
+            frames = 0;
+            gameRunning = true;
+            
+            scoreEl.innerText = score;
+            startScreen.style.display = 'none';
+            gameOverScreen.style.display = 'none';
+            healthRing.style.display = 'block';
+            
+            update();
+        }
+
+        function gameOver() {
+            gameRunning = false;
+            finalScoreEl.innerText = score;
+            gameOverScreen.style.display = 'block';
+            healthRing.style.display = 'none';
+        }
+
+        // Controls
+        window.addEventListener('keydown', (e) => {
+            if (keys.hasOwnProperty(e.code)) keys[e.code] = true;
+        });
+        window.addEventListener('keyup', (e) => {
+            if (keys.hasOwnProperty(e.code)) keys[e.code] = false;
+        });
+
+        // Initial Draw
+        ctx.fillStyle = '#050510';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    </script>
+</body>
+</html>

@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Laser Logic (Optimized)</title>
+    <style>
+        body {
+            background-color: #222;
+            color: #eee;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            user-select: none; /* Prevents highlighting text while clicking fast */
+        }
+
+        h1 { margin-bottom: 10px; color: #f44336; text-shadow: 0 0 10px #f44336; }
+
+        #game-container {
+            position: relative;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+            border: 3px solid #444;
+            background: #111;
+        }
+
+        canvas { display: block; cursor: pointer; }
+
+        #level-info {
+            position: absolute;
+            top: 10px; left: 10px;
+            font-size: 1.2rem;
+            pointer-events: none;
+            background: rgba(0,0,0,0.5);
+            padding: 5px 10px;
+            border-radius: 4px;
+        }
+
+        #win-overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85);
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+        }
+
+        .win-text {
+            font-size: 3rem;
+            color: #4CAF50;
+            text-shadow: 0 0 20px #4CAF50;
+            margin-bottom: 20px;
+        }
+
+        button {
+            background: #333;
+            color: white;
+            border: 2px solid #555;
+            padding: 10px 20px;
+            font-size: 1rem;
+            cursor: pointer;
+            margin: 5px;
+            border-radius: 4px;
+        }
+        button:hover { background: #444; border-color: #aaa; }
+        .btn-next { background: #4CAF50; border-color: #4CAF50; color: black; font-weight: bold; }
+
+        .controls-row { margin-top: 15px; }
+        .btn-back { text-decoration: none; display: inline-block; }
+    </style>
+</head>
+<body>
+
+    <h1>LASER LOGIC</h1>
+
+    <div id="game-container">
+        <canvas id="gameCanvas" width="600" height="400"></canvas>
+        <div id="level-info">Level: <span id="level-num">1</span></div>
+        
+        <div id="win-overlay">
+            <div class="win-text">TARGET ACQUIRED</div>
+            <button class="btn-next" onclick="nextLevel()">Next Level</button>
+        </div>
+    </div>
+
+    <div class="controls-row">
+        <button onclick="resetLevel()">Reset Level</button>
+        <a href="../index.html" class="btn-back"><button>Back to Arcade</button></a>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const levelNumEl = document.getElementById('level-num');
+        const winOverlay = document.getElementById('win-overlay');
+
+        const gridSize = 60; // 10x10 grid
+        const cols = canvas.width / gridSize;
+        const rows = canvas.height / gridSize;
+
+        // --- Game Assets ---
+        // 0=Empty, 1=Emitter(Right), 2=Target, 3=Wall, 
+        // 4=Mirror(/), 5=Mirror(\)
+        
+        const levels = [
+            // Level 1: Simple reflection
+            [
+                [3,3,3,3,3,3,3,3,3,3],
+                [3,0,0,0,0,0,0,0,0,3],
+                [1,0,0,4,0,0,0,0,0,3],
+                [3,0,0,0,0,0,0,0,0,3],
+                [3,0,0,0,0,0,5,0,0,3],
+                [3,0,0,0,0,0,0,0,0,3],
+                [3,0,0,2,0,0,0,0,0,3],
+                [3,0,0,0,0,0,0,0,0,3],
+                [3,3,3,3,3,3,3,3,3,3]
+            ],
+             // Level 2: Double reflection
+            [
+                [3,3,3,3,3,3,3,3,3,3],
+                [1,0,0,0,0,5,0,0,0,3],
+                [3,0,3,3,3,0,3,3,0,3],
+                [3,0,0,0,0,0,0,0,0,3],
+                [3,0,3,3,3,0,3,3,0,3],
+                [3,0,0,4,0,0,0,0,0,3],
+                [3,3,3,0,3,3,3,0,3,3],
+                [3,0,0,0,0,0,0,0,2,3],
+                [3,3,3,3,3,3,3,3,3,3]
+            ],
+            // Level 3: The Zig Zag
+            [
+                [3,3,3,3,3,3,3,3,3,3],
+                [3,0,0,0,0,0,0,0,2,3],
+                [3,0,4,0,5,0,4,0,0,3],
+                [3,0,0,0,0,0,0,0,0,3],
+                [3,0,0,0,0,0,0,0,0,3],
+                [3,0,0,0,0,0,0,0,0,3],
+                [3,0,5,0,4,0,5,0,0,3],
+                [1,0,0,0,0,0,0,0,0,3],
+                [3,3,3,3,3,3,3,3,3,3]
+            ]
+        ];
+
+        let currentLevel = 0;
+        let grid = [];
+        let emitter = {c:0, r:0, dir:{x:1, y:0}};
+        let laserPoints = []; // Stores just X,Y coordinates for drawing
+        let levelWon = false;
+
+        function loadLevel(lvlIdx) {
+            if(lvlIdx >= levels.length) {
+                alert("All Systems Operational! Game Completed.");
+                currentLevel = 0;
+            }
+            
+            // Deep copy the level data
+            grid = JSON.parse(JSON.stringify(levels[currentLevel]));
+            levelNumEl.innerText = currentLevel + 1;
+            winOverlay.style.display = 'none';
+            levelWon = false;
+            
+            // Find Emitter position
+            for(let r=0; r<rows; r++) {
+                for(let c=0; c<cols; c++) {
+                    if(grid[r][c] === 1) emitter = {c:c, r:r, dir:{x:1, y:0}};
+                }
+            }
+            
+            // Initial Calculation
+            calculateLaser();
+            draw();
+        }
+
+        function calculateLaser() {
+            laserPoints = [];
+            
+            // Start at center of emitter tile
+            let c = emitter.c;
+            let r = emitter.r;
+            let dx = emitter.dir.x;
+            let dy = emitter.dir.y;
+            
+            // Push start point (Pixel coordinates)
+            laserPoints.push({ x: c * gridSize + gridSize/2, y: r * gridSize + gridSize/2 });
+
+            // Max steps to prevent infinite loops
+            for(let i=0; i<50; i++) {
+                // Move to next tile
+                c += dx;
+                r += dy;
+
+                // Check bounds
+                if(c < 0 || c >= cols || r < 0 || r >= rows) break;
+
+                // Add point to path
+                laserPoints.push({ x: c * gridSize + gridSize/2, y: r * gridSize + gridSize/2 });
+
+                // Check collision
+                const tile = grid[r][c];
+
+                if (tile === 2) { // Target
+                    levelWon = true;
+                    winOverlay.style.display = 'flex';
+                    break; 
+                }
+                else if (tile === 3 || tile === 1) { // Wall or Emitter
+                    // Step back slightly for visual overlap, then stop
+                    break;
+                }
+                else if (tile === 4) { // Mirror /
+                    // If moving right (1,0) -> Up (0,-1)
+                    // If moving left (-1,0) -> Down (0,1)
+                    // If moving down (0,1) -> Left (-1,0)
+                    // If moving up (0,-1) -> Right (1,0)
+                    // Formula: dx_new = -dy, dy_new = -dx
+                    let temp = dx;
+                    dx = -dy;
+                    dy = -temp;
+                }
+                else if (tile === 5) { // Mirror \
+                    // If moving right (1,0) -> Down (0,1)
+                    // Formula: dx_new = dy, dy_new = dx
+                    let temp = dx;
+                    dx = dy;
+                    dy = temp;
+                }
+            }
+        }
+
+        function draw() {
+            // 1. Clear Screen
+            ctx.fillStyle = '#111';
+            ctx.fillRect(0,0,canvas.width, canvas.height);
+            
+            // 2. Draw Grid Lines (Subtle)
+            ctx.strokeStyle = '#222';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            for(let i=0; i<=cols; i++) { ctx.moveTo(i*gridSize,0); ctx.lineTo(i*gridSize, canvas.height); }
+            for(let i=0; i<=rows; i++) { ctx.moveTo(0,i*gridSize); ctx.lineTo(canvas.width, i*gridSize); }
+            ctx.stroke();
+
+            // 3. Draw Tiles
+            for(let r=0; r<rows; r++) {
+                for(let c=0; c<cols; c++) {
+                    const type = grid[r][c];
+                    const x = c * gridSize;
+                    const y = r * gridSize;
+                    
+                    if(type === 3) { // Wall
+                        ctx.fillStyle = '#444'; ctx.fillRect(x+1, y+1, gridSize-2, gridSize-2);
+                    } else if (type === 1) { // Emitter
+                        ctx.fillStyle = '#555'; ctx.fillRect(x+1, y+1, gridSize-2, gridSize-2);
+                        // Nub pointing right
+                        ctx.fillStyle = '#f44336'; 
+                        ctx.beginPath(); ctx.arc(x+gridSize-10, y+gridSize/2, 8, 0, Math.PI*2); ctx.fill();
+                    } else if (type === 2) { // Target
+                        ctx.fillStyle = '#333'; ctx.fillRect(x+1, y+1, gridSize-2, gridSize-2);
+                        ctx.fillStyle = '#4CAF50'; 
+                        ctx.beginPath(); ctx.arc(x+gridSize/2, y+gridSize/2, 12, 0, Math.PI*2); ctx.fill();
+                        // Glow ring
+                        ctx.strokeStyle = '#fff'; ctx.lineWidth=2; 
+                        ctx.beginPath(); ctx.arc(x+gridSize/2, y+gridSize/2, 16, 0, Math.PI*2); ctx.stroke();
+                    } else if (type === 4) { // Mirror /
+                        drawMirror(x, y, '/');
+                    } else if (type === 5) { // Mirror \
+                        drawMirror(x, y, '\\');
+                    }
+                }
+            }
+
+            // 4. Draw Laser
+            if(laserPoints.length > 1) {
+                ctx.strokeStyle = '#f44336';
+                ctx.lineWidth = 5;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                
+                // Outer Glow
+                ctx.shadowBlur = 20;
+                ctx.shadowColor = '#f00';
+                
+                ctx.beginPath();
+                ctx.moveTo(laserPoints[0].x, laserPoints[0].y);
+                for(let i=1; i<laserPoints.length; i++) {
+                    ctx.lineTo(laserPoints[i].x, laserPoints[i].y);
+                }
+                ctx.stroke();
+                
+                // Inner White Core (for "hot" look)
+                ctx.shadowBlur = 0;
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(laserPoints[0].x, laserPoints[0].y);
+                for(let i=1; i<laserPoints.length; i++) {
+                    ctx.lineTo(laserPoints[i].x, laserPoints[i].y);
+                }
+                ctx.stroke();
+            }
+        }
+
+        function drawMirror(x, y, type) {
+            ctx.fillStyle = '#1a1a1a'; ctx.fillRect(x+2, y+2, gridSize-4, gridSize-4);
+            
+            // Mirror frame
+            ctx.strokeStyle = '#555';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            
+            // Mirror Surface
+            const surfaceColor = '#00bcd4'; // Cyan
+            
+            if(type === '/') {
+                // Diagonal /
+                ctx.moveTo(x+10, y+gridSize-10); ctx.lineTo(x+gridSize-10, y+10);
+                ctx.stroke();
+                
+                // Surface
+                ctx.strokeStyle = surfaceColor;
+                ctx.beginPath();
+                ctx.moveTo(x+8, y+gridSize-12); ctx.lineTo(x+gridSize-12, y+8);
+                ctx.stroke();
+            } else {
+                // Diagonal \
+                ctx.moveTo(x+10, y+10); ctx.lineTo(x+gridSize-10, y+gridSize-10);
+                ctx.stroke();
+                
+                // Surface
+                ctx.strokeStyle = surfaceColor;
+                ctx.beginPath();
+                ctx.moveTo(x+12, y+8); ctx.lineTo(x+gridSize-8, y+gridSize-12);
+                ctx.stroke();
+            }
+        }
+
+        // Input Handling
+        canvas.addEventListener('mousedown', (e) => {
+            if(levelWon) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const c = Math.floor((e.clientX - rect.left) / gridSize);
+            const r = Math.floor((e.clientY - rect.top) / gridSize);
+
+            if(c < 0 || c >= cols || r < 0 || r >= rows) return;
+
+            const tile = grid[r][c];
+            let changed = false;
+
+            if(tile === 4) {
+                grid[r][c] = 5;
+                changed = true;
+            } else if (tile === 5) {
+                grid[r][c] = 4;
+                changed = true;
+            }
+
+            if(changed) {
+                calculateLaser();
+                draw(); // Only redraw on click
+            }
+        });
+
+        function nextLevel() {
+            currentLevel++;
+            loadLevel(currentLevel);
+        }
+
+        function resetLevel() {
+            loadLevel(currentLevel);
+        }
+
+        // Init
+        loadLevel(currentLevel);
+
+    </script>
+</body>
+</html>

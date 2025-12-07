@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dimension Hopper</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #111;
+            overflow: hidden;
+            font-family: 'Segoe UI', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        #game-container {
+            position: relative;
+            box-shadow: 0 0 30px rgba(0, 255, 255, 0.3);
+            border: 2px solid white;
+        }
+
+        canvas {
+            display: block;
+            background: #000;
+        }
+
+        #ui-layer {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-size: 1.5rem;
+            font-weight: bold;
+            text-shadow: 2px 2px 0 #000;
+            pointer-events: none;
+        }
+
+        #start-screen, #game-over-screen {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: white;
+        }
+
+        #game-over-screen { display: none; }
+
+        h1 {
+            font-size: 3rem;
+            margin: 0;
+            text-transform: uppercase;
+            letter-spacing: 5px;
+            text-shadow: 0 0 10px #0ff;
+        }
+
+        p { font-size: 1.2rem; margin-bottom: 20px; color: #ccc; }
+
+        button {
+            background: white;
+            color: black;
+            border: none;
+            padding: 15px 40px;
+            font-size: 1.2rem;
+            font-weight: bold;
+            cursor: pointer;
+            text-transform: uppercase;
+            transition: transform 0.1s;
+        }
+
+        button:hover { transform: scale(1.05); box-shadow: 0 0 15px white; }
+
+        .btn-back {
+            display: inline-block;
+            margin-top: 15px;
+            color: #666;
+            text-decoration: none;
+            font-size: 0.9rem;
+            border: 1px solid #444;
+            padding: 5px 10px;
+        }
+        .btn-back:hover { color: white; border-color: white; }
+
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <canvas id="gameCanvas" width="800" height="400"></canvas>
+        
+        <div id="ui-layer">SCORE: <span id="score">0</span></div>
+
+        <div id="start-screen">
+            <h1>Dimension<br>Hopper</h1>
+            <p>Click or Spacebar to FLIP GRAVITY</p>
+            <button onclick="startGame()">Start Run</button>
+            <br>
+            <a href="../index.html" class="btn-back">Back to Arcade</a>
+        </div>
+
+        <div id="game-over-screen">
+            <h1 style="color: #ff0055; text-shadow: 0 0 10px #ff0055;">CRITICAL FAILURE</h1>
+            <p>Distance: <span id="final-score">0</span>m</p>
+            <button onclick="resetGame()">Retry</button>
+            <br>
+            <a href="../index.html" class="btn-back">Back to Arcade</a>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreEl = document.getElementById('score');
+        const startScreen = document.getElementById('start-screen');
+        const gameOverScreen = document.getElementById('game-over-screen');
+        const finalScoreEl = document.getElementById('final-score');
+
+        // Game Constants
+        const GRAVITY_FORCE = 0.6;
+        const JUMP_FORCE = 10;
+        const SPEED = 6;
+        
+        // Game State
+        let gameRunning = false;
+        let score = 0;
+        let frames = 0;
+        
+        // Player Object
+        const player = {
+            x: 100,
+            y: 200,
+            width: 30,
+            height: 30,
+            dy: 0,
+            gravityDirection: 1, // 1 is down, -1 is up
+            color: '#0ff', // Cyan
+            
+            draw: function() {
+                ctx.fillStyle = this.color;
+                ctx.shadowBlur = 15;
+                ctx.shadowColor = this.color;
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+                
+                // Draw "eye" to show orientation
+                ctx.fillStyle = 'black';
+                ctx.shadowBlur = 0;
+                if(this.gravityDirection === 1) {
+                    ctx.fillRect(this.x + 5, this.y + 20, 20, 5); // Bottom stripe
+                } else {
+                    ctx.fillRect(this.x + 5, this.y + 5, 20, 5); // Top stripe
+                }
+            },
+            
+            update: function() {
+                // Apply Gravity
+                this.dy += GRAVITY_FORCE * this.gravityDirection;
+                this.y += this.dy;
+
+                // Floor Collision
+                if (this.y + this.height > canvas.height) {
+                    this.y = canvas.height - this.height;
+                    this.dy = 0;
+                }
+                
+                // Ceiling Collision
+                if (this.y < 0) {
+                    this.y = 0;
+                    this.dy = 0;
+                }
+            },
+            
+            flip: function() {
+                this.gravityDirection *= -1;
+                // Add a little push to make movement feel snappy
+                // If flipping UP, set velocity up. If flipping DOWN, set velocity down.
+                // This prevents "floating" in mid-air.
+                this.dy = 5 * this.gravityDirection; 
+            }
+        };
+
+        // Obstacles
+        const obstacles = [];
+        const particles = [];
+
+        class Obstacle {
+            constructor() {
+                this.w = 40;
+                this.h = Math.random() * 60 + 40; // Random height 40-100
+                this.x = canvas.width;
+                
+                // Randomly place on Floor or Ceiling
+                this.isCeiling = Math.random() < 0.5;
+                
+                if (this.isCeiling) {
+                    this.y = 0;
+                } else {
+                    this.y = canvas.height - this.h;
+                }
+            }
+
+            draw() {
+                ctx.fillStyle = '#fff';
+                ctx.shadowBlur = 10;
+                ctx.shadowColor = '#fff';
+                
+                // Draw Spike Triangle
+                ctx.beginPath();
+                if(this.isCeiling) {
+                    ctx.moveTo(this.x, 0);
+                    ctx.lineTo(this.x + this.w, 0);
+                    ctx.lineTo(this.x + this.w / 2, this.h);
+                } else {
+                    ctx.moveTo(this.x, canvas.height);
+                    ctx.lineTo(this.x + this.w, canvas.height);
+                    ctx.lineTo(this.x + this.w / 2, canvas.height - this.h);
+                }
+                ctx.fill();
+                ctx.shadowBlur = 0;
+            }
+
+            update() {
+                this.x -= SPEED;
+            }
+        }
+
+        // Particle System (Death Effect)
+        class Particle {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.size = Math.random() * 5 + 2;
+                this.speedX = Math.random() * 10 - 5;
+                this.speedY = Math.random() * 10 - 5;
+                this.color = Math.random() < 0.5 ? '#0ff' : '#fff';
+                this.life = 1.0;
+            }
+            update() {
+                this.x += this.speedX;
+                this.y += this.speedY;
+                this.life -= 0.02;
+            }
+            draw() {
+                ctx.fillStyle = this.color;
+                ctx.globalAlpha = this.life;
+                ctx.fillRect(this.x, this.y, this.size, this.size);
+                ctx.globalAlpha = 1.0;
+            }
+        }
+
+        function spawnObstacle() {
+            // Spawn every 90 frames roughly (1.5 seconds)
+            // But randomize it slightly to make it harder
+            if (frames % 90 === 0) { 
+                obstacles.push(new Obstacle());
+            }
+        }
+
+        function checkCollisions() {
+            // AABB Collision Detection with some forgiveness (hitbox slightly smaller)
+            const padding = 5;
+            
+            obstacles.forEach(obs => {
+                // Determine hitbox of the triangle (simplified to a rect for gameplay feel)
+                // We make the hitbox slightly smaller than the visual so it feels fair
+                let obsY = obs.y;
+                if (!obs.isCeiling) obsY = canvas.height - obs.h;
+
+                // Simple Rect Collision
+                if (
+                    player.x + player.width - padding > obs.x &&
+                    player.x + padding < obs.x + obs.w &&
+                    player.y + player.height - padding > obs.y &&
+                    player.y + padding < obs.y + obs.h
+                ) {
+                    gameOver();
+                }
+            });
+        }
+
+        function gameLoop() {
+            if (!gameRunning) return;
+
+            // Clear Screen
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw Floor/Ceiling Lines
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(0, 1); ctx.lineTo(canvas.width, 1);
+            ctx.moveTo(0, canvas.height-1); ctx.lineTo(canvas.width, canvas.height-1);
+            ctx.stroke();
+
+            // Player Logic
+            player.update();
+            player.draw();
+
+            // Obstacle Logic
+            spawnObstacle();
+            for (let i = 0; i < obstacles.length; i++) {
+                obstacles[i].update();
+                obstacles[i].draw();
+                
+                // Remove off-screen
+                if (obstacles[i].x + obstacles[i].w < 0) {
+                    obstacles.splice(i, 1);
+                    i--;
+                    score++;
+                    scoreEl.innerText = score;
+                }
+            }
+
+            checkCollisions();
+
+            frames++;
+            requestAnimationFrame(gameLoop);
+        }
+
+        function startGame() {
+            player.y = 200;
+            player.dy = 0;
+            player.gravityDirection = 1;
+            obstacles.length = 0; // Clear array
+            score = 0;
+            frames = 0;
+            scoreEl.innerText = '0';
+            
+            gameRunning = true;
+            startScreen.style.display = 'none';
+            gameOverScreen.style.display = 'none';
+            gameLoop();
+        }
+
+        function gameOver() {
+            gameRunning = false;
+            
+            // Create Explosion
+            for(let i=0; i<30; i++) {
+                particles.push(new Particle(player.x + 15, player.y + 15));
+            }
+            
+            // Run a short animation loop just for particles
+            let particleFrames = 0;
+            function particleLoop() {
+                if(particleFrames > 50) return; // Stop after explosion fades
+                ctx.fillStyle = 'black';
+                ctx.fillRect(0,0, canvas.width, canvas.height);
+                
+                // Redraw static obstacles (frozen)
+                obstacles.forEach(o => o.draw());
+                
+                // Draw Particles
+                particles.forEach((p, index) => {
+                    p.update();
+                    p.draw();
+                    if(p.life <= 0) particles.splice(index, 1);
+                });
+                
+                particleFrames++;
+                requestAnimationFrame(particleLoop);
+            }
+            particleLoop();
+
+            finalScoreEl.innerText = score;
+            setTimeout(() => {
+                gameOverScreen.style.display = 'block';
+            }, 500);
+        }
+        
+        function resetGame() {
+            startGame();
+        }
+
+        // Controls
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') {
+                if(gameRunning) player.flip();
+                else if(startScreen.style.display !== 'none') startGame();
+            }
+        });
+
+        window.addEventListener('mousedown', (e) => {
+            if(e.target.tagName !== 'BUTTON' && e.target.tagName !== 'A') {
+                if(gameRunning) player.flip();
+            }
+        });
+
+    </script>
+</body>
+</html>

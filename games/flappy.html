@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neon Data Runner</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #050505; /* Deep black */
+            overflow: hidden;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        /* The Game Container */
+        #game-container {
+            position: relative;
+            box-shadow: 0 0 50px rgba(0, 255, 255, 0.2);
+            border: 2px solid #333;
+        }
+
+        canvas {
+            display: block;
+            background: linear-gradient(to bottom, #111, #222);
+        }
+
+        /* CRT Scanline Effect Overlay */
+        .scanlines {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: linear-gradient(
+                to bottom,
+                rgba(255,255,255,0),
+                rgba(255,255,255,0) 50%,
+                rgba(0,0,0,0.2) 50%,
+                rgba(0,0,0,0.2)
+            );
+            background-size: 100% 4px;
+            pointer-events: none; /* Let clicks pass through */
+            z-index: 10;
+        }
+
+        /* UI Overlay */
+        #ui-layer {
+            position: absolute;
+            top: 20px;
+            width: 100%;
+            text-align: center;
+            color: #0ff; /* Neon Cyan */
+            text-shadow: 0 0 10px #0ff;
+            pointer-events: none;
+            z-index: 20;
+        }
+
+        h1 { margin: 0; font-size: 3rem; text-transform: uppercase; letter-spacing: 5px; }
+        p { margin: 5px 0; font-size: 1.2rem; }
+
+        /* Start / Game Over Screen */
+        #menu {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            z-index: 30;
+        }
+
+        button {
+            background: transparent;
+            color: #f0f; /* Neon Pink */
+            border: 2px solid #f0f;
+            padding: 15px 40px;
+            font-size: 1.5rem;
+            font-family: inherit;
+            text-transform: uppercase;
+            cursor: pointer;
+            box-shadow: 0 0 15px #f0f;
+            text-shadow: 0 0 5px #f0f;
+            transition: all 0.2s;
+        }
+
+        button:hover {
+            background: #f0f;
+            color: black;
+            box-shadow: 0 0 30px #f0f;
+        }
+
+        .btn-back {
+            display: inline-block;
+            margin-top: 20px;
+            color: #666;
+            text-decoration: none;
+            font-size: 0.9rem;
+            pointer-events: auto;
+            border: 1px solid #444;
+            padding: 5px 10px;
+        }
+        .btn-back:hover { color: white; border-color: white; }
+
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <canvas id="canvas" width="480" height="600"></canvas>
+        <div class="scanlines"></div>
+        
+        <div id="ui-layer">
+            <h1 id="score">0</h1>
+            <p>DATA PACKETS COLLECTED</p>
+        </div>
+
+        <div id="menu">
+            <h2 id="title" style="color: white; text-shadow: 0 0 10px white; font-size: 2rem;">SYSTEM READY</h2>
+            <button onclick="resetGame()">INITIALIZE</button>
+            <br>
+        </div>
+        <a href="../index.html" class="btn-back">ABORT / RETURN</a>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const scoreEl = document.getElementById('score');
+        const menuEl = document.getElementById('menu');
+        const titleEl = document.getElementById('title');
+
+        // Game Variables
+        let frames = 0;
+        let score = 0;
+        let gameRunning = false;
+        let speed = 3;
+
+        // --- THE PLAYER (Data Packet) ---
+        const player = {
+            x: 50,
+            y: 150,
+            radius: 12,
+            velocity: 0,
+            gravity: 0.25,
+            jumpStrength: 4.5,
+            
+            draw: function() {
+                // Neon Glow Effect
+                ctx.shadowBlur = 15;
+                ctx.shadowColor = "#f0f"; // Pink Glow
+                ctx.fillStyle = "#f0f";
+                
+                // Draw Triangle shape instead of circle
+                ctx.beginPath();
+                ctx.moveTo(this.x + 10, this.y);
+                ctx.lineTo(this.x - 10, this.y - 10);
+                ctx.lineTo(this.x - 10, this.y + 10);
+                ctx.fill();
+                
+                ctx.shadowBlur = 0; // Reset glow for other elements
+            },
+            
+            update: function() {
+                this.velocity += this.gravity;
+                this.y += this.velocity;
+
+                // Floor Collision
+                if (this.y + this.radius >= canvas.height) {
+                    gameOver();
+                }
+                
+                // Ceiling Collision (Optional)
+                if (this.y - this.radius <= 0) {
+                    this.y = this.radius;
+                    this.velocity = 0;
+                }
+            },
+            
+            flap: function() {
+                this.velocity = -this.jumpStrength;
+                // Add particles when jumping
+                for(let i=0; i<5; i++) {
+                    particles.push(new Particle(this.x - 10, this.y));
+                }
+            }
+        };
+
+        // --- PARTICLE SYSTEM (The "Outside the Box" visual twist) ---
+        const particles = [];
+        
+        class Particle {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.size = Math.random() * 5 + 2;
+                this.speedX = Math.random() * -2 - 1; // Move left
+                this.speedY = Math.random() * 2 - 1;  // Random up/down
+                this.color = `hsl(${Math.random() * 60 + 280}, 100%, 50%)`; // Purple/Pink range
+                this.life = 1.0; // Opacity
+            }
+            update() {
+                this.x += this.speedX;
+                this.y += this.speedY;
+                this.life -= 0.03; // Fade out
+            }
+            draw() {
+                ctx.fillStyle = this.color;
+                ctx.globalAlpha = this.life;
+                ctx.fillRect(this.x, this.y, this.size, this.size);
+                ctx.globalAlpha = 1.0;
+            }
+        }
+
+        // --- OBSTACLES (Firewalls) ---
+        const pipes = [];
+        const pipeWidth = 50;
+        const gap = 150;
+        
+        function handlePipes() {
+            if (frames % 100 === 0) { // Spawn rate
+                // Random height
+                let topHeight = Math.random() * (canvas.height - gap - 100) + 50;
+                
+                pipes.push({
+                    x: canvas.width,
+                    topHeight: topHeight, // Height of top pipe
+                    passed: false
+                });
+            }
+
+            for (let i = 0; i < pipes.length; i++) {
+                let p = pipes[i];
+                p.x -= speed;
+
+                // Drawing Walls
+                ctx.shadowBlur = 10;
+                ctx.shadowColor = "#0ff"; // Cyan Glow
+                ctx.fillStyle = "#0ff";
+                
+                // Top Pipe
+                ctx.fillRect(p.x, 0, pipeWidth, p.topHeight);
+                // Bottom Pipe
+                ctx.fillRect(p.x, p.topHeight + gap, pipeWidth, canvas.height - (p.topHeight + gap));
+                
+                ctx.shadowBlur = 0;
+
+                // Collision Detection
+                // A simple AABB check between player circle (treated as box) and pipe rects
+                if (
+                    player.x + 10 > p.x && 
+                    player.x - 10 < p.x + pipeWidth && 
+                    (player.y - 10 < p.topHeight || player.y + 10 > p.topHeight + gap)
+                ) {
+                    gameOver();
+                }
+
+                // Scoring
+                if (p.x + pipeWidth < player.x && !p.passed) {
+                    score++;
+                    scoreEl.innerText = score;
+                    p.passed = true;
+                    // Slightly increase speed every 5 points for difficulty
+                    if(score % 5 === 0) speed += 0.5;
+                }
+
+                // Remove off-screen pipes
+                if (p.x + pipeWidth < 0) {
+                    pipes.shift();
+                    i--;
+                }
+            }
+        }
+
+        // --- GAME LOOP ---
+        function loop() {
+            if (!gameRunning) return;
+
+            // Clear Canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Update & Draw Particles
+            for(let i=0; i<particles.length; i++) {
+                particles[i].update();
+                particles[i].draw();
+                if(particles[i].life <= 0) {
+                    particles.splice(i, 1);
+                    i--;
+                }
+            }
+
+            // Draw Pipes
+            handlePipes();
+
+            // Draw & Update Player
+            player.update();
+            player.draw();
+
+            frames++;
+            requestAnimationFrame(loop);
+        }
+
+        function resetGame() {
+            player.y = 150;
+            player.velocity = 0;
+            pipes.length = 0; // Clear array
+            particles.length = 0;
+            score = 0;
+            speed = 3;
+            frames = 0;
+            scoreEl.innerText = score;
+            gameRunning = true;
+            menuEl.style.display = "none";
+            loop();
+        }
+
+        function gameOver() {
+            gameRunning = false;
+            titleEl.innerText = "SYSTEM CRASHED";
+            titleEl.style.color = "red";
+            titleEl.style.textShadow = "0 0 10px red";
+            menuEl.style.display = "block";
+        }
+
+        // --- CONTROLS ---
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') {
+                if(gameRunning) player.flap();
+                else resetGame();
+            }
+        });
+
+        window.addEventListener('mousedown', (e) => {
+            // FIX: Check if the user clicked the "Return" button
+            if (e.target.closest('.btn-back')) return; // Do nothing if clicking the Back button
+            
+            // FIX: Check if user clicked the "Initialize" button (to avoid double-starting)
+            if (e.target.closest('button')) return; 
+
+            if(gameRunning) player.flap();
+            else resetGame();
+        });
+
+        // Initial Draw
+        ctx.fillStyle = "#111";
+        ctx.fillRect(0,0, canvas.width, canvas.height);
+
+    </script>
+</body>
+</html>

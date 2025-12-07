@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Syntax Error</title>
+    <style>
+        body {
+            background-color: #0c0c0c;
+            color: #0f0;
+            font-family: 'Courier New', Courier, monospace;
+            margin: 0;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+        }
+
+        #game-ui {
+            position: absolute;
+            top: 20px;
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            padding: 0 50px;
+            box-sizing: border-box;
+            font-size: 1.5rem;
+            text-shadow: 0 0 5px #0f0;
+            z-index: 10;
+        }
+
+        canvas {
+            border-bottom: 2px solid #0f0;
+            box-shadow: 0 10px 20px rgba(0, 255, 0, 0.1);
+        }
+
+        .active-word {
+            color: white; /* Highlight the word currently being typed */
+            text-shadow: 0 0 10px white;
+        }
+
+        #game-over {
+            position: absolute;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            background: rgba(0,0,0,0.9);
+            padding: 40px;
+            border: 2px solid #0f0;
+        }
+
+        h1 { margin: 0 0 20px 0; }
+        
+        button {
+            background: black;
+            color: #0f0;
+            border: 1px solid #0f0;
+            padding: 10px 30px;
+            font-family: inherit;
+            font-size: 1.2rem;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        button:hover { background: #0f0; color: black; }
+
+        .btn-back {
+            margin-top: 20px;
+            text-decoration: none;
+            color: #555;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-ui">
+        <span>BUGS PATCHED: <span id="score">0</span></span>
+        <span>SYSTEM HEALTH: <span id="health">100</span>%</span>
+    </div>
+
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+
+    <div id="game-over">
+        <h1 style="color: red;">COMPILATION FAILED</h1>
+        <p>Final Score: <span id="final-score">0</span></p>
+        <button onclick="resetGame()">REBOOT SYSTEM</button>
+        <a href="../index.html" class="btn-back">EXIT TERMINAL</a>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreEl = document.getElementById('score');
+        const healthEl = document.getElementById('health');
+        const gameOverEl = document.getElementById('game-over');
+        const finalScoreEl = document.getElementById('final-score');
+
+        // Word Dictionary (Tech/Code themed)
+        const wordList = [
+            'int', 'float', 'double', 'char', 'void', 'class', 'public', 'private',
+            'return', 'if', 'else', 'while', 'for', 'switch', 'case', 'break',
+            'static', 'const', 'null', 'true', 'false', 'import', 'export',
+            'promise', 'async', 'await', 'react', 'angular', 'vue', 'node',
+            'python', 'ruby', 'java', 'swift', 'rust', 'docker', 'git', 'merge',
+            'push', 'pull', 'commit', 'branch', 'checkout', 'status', 'config',
+            'compile', 'runtime', 'syntax', 'error', 'debug', 'deploy', 'build',
+            'stack', 'heap', 'queue', 'tree', 'graph', 'hash', 'object', 'array',
+            'string', 'number', 'boolean', 'symbol', 'map', 'set', 'json', 'xml',
+            'html', 'css', 'sql', 'mongo', 'redis', 'aws', 'azure', 'linux', 'bash'
+        ];
+
+        let words = [];
+        let score = 0;
+        let health = 100;
+        let spawnRate = 2000; // ms
+        let lastSpawn = 0;
+        let speed = 0.5;
+        let activeWordIndex = -1; // Index of the word currently being typed
+        let gameRunning = true;
+        let animationId;
+
+        class FallingWord {
+            constructor() {
+                this.text = wordList[Math.floor(Math.random() * wordList.length)];
+                this.x = Math.random() * (canvas.width - 100) + 50;
+                this.y = -30;
+                this.typed = ''; // What user has typed so far
+            }
+
+            draw(isActive) {
+                ctx.font = "bold 24px 'Courier New'";
+                
+                if (isActive) {
+                    // Draw active word: Typed part in White, Remaining in Green
+                    const typedWidth = ctx.measureText(this.typed).width;
+                    
+                    ctx.fillStyle = 'white';
+                    ctx.fillText(this.typed, this.x, this.y);
+                    
+                    ctx.fillStyle = '#0f0';
+                    ctx.fillText(this.text.substring(this.typed.length), this.x + typedWidth, this.y);
+                    
+                    // Add a cursor/underline effect
+                    ctx.fillRect(this.x, this.y + 5, ctx.measureText(this.text).width, 2);
+                } else {
+                    // Draw inactive word (dimmer green)
+                    ctx.fillStyle = '#00aa00';
+                    ctx.fillText(this.text, this.x, this.y);
+                }
+            }
+
+            update() {
+                this.y += speed;
+            }
+        }
+
+        function spawnWord(timestamp) {
+            if (timestamp - lastSpawn > spawnRate) {
+                words.push(new FallingWord());
+                lastSpawn = timestamp;
+                
+                // Increase difficulty
+                if (spawnRate > 500) spawnRate -= 10; 
+                if (speed < 3) speed += 0.01;
+            }
+        }
+
+        function updateGame(timestamp) {
+            if (!gameRunning) return;
+
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.3)'; // Trail effect
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            spawnWord(timestamp);
+
+            // Update Words
+            for (let i = 0; i < words.length; i++) {
+                words[i].update();
+                
+                // Draw (check if it's the active word)
+                words[i].draw(i === activeWordIndex);
+
+                // Check collision (bottom of screen)
+                if (words[i].y > canvas.height) {
+                    health -= 10;
+                    healthEl.innerText = health;
+                    healthEl.style.color = 'red';
+                    setTimeout(() => healthEl.style.color = '#0f0', 200);
+
+                    // If active word hits bottom, reset active status
+                    if (i === activeWordIndex) {
+                        activeWordIndex = -1;
+                    }
+
+                    words.splice(i, 1);
+                    i--;
+
+                    if (health <= 0) gameOver();
+                }
+            }
+
+            animationId = requestAnimationFrame(updateGame);
+        }
+
+        // Handle Typing
+        window.addEventListener('keydown', (e) => {
+            if (!gameRunning) return;
+            
+            // Ignore non-character keys (Shift, Ctrl, etc.)
+            if (e.key.length !== 1) return;
+
+            const char = e.key.toLowerCase();
+
+            // Scenario 1: No word is currently active. Find one that starts with this char.
+            if (activeWordIndex === -1) {
+                // Find lowest matching word (closest to bottom)
+                let lowestIndex = -1;
+                let maxY = -100;
+
+                for (let i = 0; i < words.length; i++) {
+                    if (words[i].text.startsWith(char)) {
+                        if (words[i].y > maxY) {
+                            maxY = words[i].y;
+                            lowestIndex = i;
+                        }
+                    }
+                }
+
+                if (lowestIndex !== -1) {
+                    activeWordIndex = lowestIndex;
+                    words[activeWordIndex].typed += char;
+                    checkWordCompletion();
+                }
+            } 
+            // Scenario 2: A word is active. Check next character.
+            else {
+                const word = words[activeWordIndex];
+                const nextCharNeeded = word.text[word.typed.length];
+                
+                if (char === nextCharNeeded) {
+                    word.typed += char;
+                    checkWordCompletion();
+                } else {
+                    // Typo! Optional: Flash screen red or play sound
+                    // For now, we just don't register the key
+                }
+            }
+        });
+
+        function checkWordCompletion() {
+            if (activeWordIndex === -1) return;
+
+            const word = words[activeWordIndex];
+            if (word.typed === word.text) {
+                // Word Completed!
+                words.splice(activeWordIndex, 1);
+                activeWordIndex = -1; // Reset active
+                score++;
+                scoreEl.innerText = score;
+                
+                // Visual pop effect (simple circle)
+                ctx.fillStyle = 'white';
+                ctx.beginPath();
+                ctx.arc(word.x, word.y, 20, 0, Math.PI*2);
+                ctx.fill();
+            }
+        }
+
+        function gameOver() {
+            gameRunning = false;
+            cancelAnimationFrame(animationId);
+            finalScoreEl.innerText = score;
+            gameOverEl.style.display = 'flex';
+        }
+
+        function resetGame() {
+            words = [];
+            score = 0;
+            health = 100;
+            spawnRate = 2000;
+            speed = 0.5;
+            activeWordIndex = -1;
+            gameRunning = true;
+            
+            scoreEl.innerText = 0;
+            healthEl.innerText = 100;
+            gameOverEl.style.display = 'none';
+            
+            requestAnimationFrame(updateGame);
+        }
+
+        // Start
+        requestAnimationFrame(updateGame);
+
+    </script>
+</body>
+</html>

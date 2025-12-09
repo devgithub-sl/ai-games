@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Memory Match</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Memory Match (Expanded)</title>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -14,6 +14,8 @@
             justify-content: center;
             min-height: 100vh;
             margin: 0;
+            /* Prevent common mobile interference */
+            touch-action: manipulation; 
         }
 
         h1 { color: #673ab7; margin-bottom: 10px; }
@@ -25,29 +27,41 @@
             margin-bottom: 20px;
             color: #333;
         }
-
+        
+        /* --- GRID CONTAINER (5x4) --- */
         .game-grid {
             display: grid;
-            grid-template-columns: repeat(4, 100px);
-            grid-template-rows: repeat(4, 100px);
-            gap: 10px;
-            perspective: 1000px; /* Essential for 3D flip effect */
+            /* 4 columns */
+            grid-template-columns: repeat(4, 1fr); 
+            /* 5 rows */
+            grid-template-rows: repeat(5, 1fr); 
+            gap: 8px; /* Slightly smaller gap */
+            perspective: 1000px;
+            width: 90vw; /* Responsive width */
+            max-width: 450px; /* Cap size for larger screens */
         }
 
         /* Card Container */
         .card {
             background-color: transparent;
             width: 100%;
-            height: 100%;
-            cursor: pointer;
+            /* Height will be set by grid rows, but we need square aspect ratio */
+            padding-bottom: 100%; 
             position: relative;
             transform-style: preserve-3d;
-            transition: transform 0.5s;
+            transition: transform 0.4s; /* Faster flip for snappier mobile feel */
         }
 
         /* The Flip Action */
         .card.flip {
             transform: rotateY(180deg);
+        }
+        
+        /* New: Matched cards disappear */
+        .card.matched {
+            visibility: hidden;
+            transition: visibility 0.5s, opacity 0.5s;
+            opacity: 0;
         }
 
         /* Front and Back common styles */
@@ -55,28 +69,44 @@
             width: 100%;
             height: 100%;
             position: absolute;
+            top: 0;
+            left: 0;
             border-radius: 8px;
             display: flex;
             justify-content: center;
             align-items: center;
-            font-size: 3rem;
-            backface-visibility: hidden; /* Hides the back when flipped */
+            font-size: 2rem; /* Adjusted default font size */
+            backface-visibility: hidden; 
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         }
 
-        /* Front Face (The Content/Emoji) - Initially hidden by rotation */
+        /* Front Face */
         .front-face {
             background-color: white;
             transform: rotateY(180deg);
             border: 2px solid #009688;
         }
 
-        /* Back Face (The Cover) - Initially visible */
+        /* Back Face */
         .back-face {
             background-color: #673ab7;
             color: white;
-            font-size: 2rem;
+            font-size: 1.5rem;
         }
+        
+        /* Win Screen Overlay */
+        #win-message {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+        }
+        #win-message h2 { font-size: 3rem; color: #ffeb3b; }
 
         .btn-container {
             margin-top: 30px;
@@ -92,6 +122,7 @@
             cursor: pointer;
             text-decoration: none;
             color: white;
+            -webkit-tap-highlight-color: transparent;
         }
 
         .btn-restart { background-color: #009688; }
@@ -99,15 +130,6 @@
 
         .btn-back { background-color: #757575; }
         .btn-back:hover { background-color: #616161; }
-
-        /* Mobile Responsive */
-        @media (max-width: 500px) {
-            .game-grid {
-                grid-template-columns: repeat(4, 70px);
-                grid-template-rows: repeat(4, 70px);
-            }
-            .front-face { font-size: 2rem; }
-        }
     </style>
 </head>
 <body>
@@ -126,19 +148,34 @@
         <button class="btn btn-restart" onclick="restartGame()">Restart</button>
         <a href="../index.html" class="btn btn-back">Back to Arcade</a>
     </div>
+    
+    <div id="win-message">
+        <h2 id="win-title">CONGRATULATIONS!</h2>
+        <p>Time: <b id="final-time"></b></p>
+        <p>Moves: <b id="final-moves"></b></p>
+        <button class="btn btn-restart" onclick="hideWinMessage(); restartGame();">Play Again</button>
+    </div>
 
     <script>
         const grid = document.getElementById('grid');
         const moveEl = document.getElementById('move-count');
         const timeEl = document.getElementById('time-count');
+        const winMessageEl = document.getElementById('win-message');
+        const finalTimeEl = document.getElementById('final-time');
+        const finalMovesEl = document.getElementById('final-moves');
 
-        // Game State
-        const emojis = ['🍕', '🍕', '🚀', '🚀', '🐱', '🐱', '🌵', '🌵', '🎸', '🎸', '💎', '💎', '🍦', '🍦', '🎈', '🎈'];
+        // Game State (EXPANDED TO 10 PAIRS = 20 CARDS)
+        const emojis = [
+            '🍕', '🍕', '🚀', '🚀', '🐱', '🐱', '🌵', '🌵', '🎸', '🎸', 
+            '💎', '💎', '🍦', '🍦', '🎈', '🎈', '💾', '💾', '🔑', '🔑' 
+        ]; // 20 items total
+        
         let cards = [];
         let hasFlippedCard = false;
         let lockBoard = false;
         let firstCard, secondCard;
         let moves = 0;
+        let matchedPairs = 0; // Track matched pairs
         let timerInterval;
         let seconds = 0;
         let gameStarted = false;
@@ -150,11 +187,13 @@
         function createBoard() {
             grid.innerHTML = '';
             shuffle(emojis);
+            matchedPairs = 0;
+            
             emojis.forEach(emoji => {
-                // Create Card HTML Structure
                 const card = document.createElement('div');
                 card.classList.add('card');
-                card.dataset.emoji = emoji; // Store value for matching logic
+                card.dataset.emoji = emoji; 
+                card.dataset.listener = 'true'; // Custom flag for listener status
 
                 const frontFace = document.createElement('div');
                 frontFace.classList.add('front-face');
@@ -162,19 +201,23 @@
 
                 const backFace = document.createElement('div');
                 backFace.classList.add('back-face');
-                backFace.innerHTML = '?';
+                backFace.innerHTML = '?'; // Simpler back face
 
                 card.appendChild(frontFace);
                 card.appendChild(backFace);
                 
+                // Use a dedicated function reference for easy removal
                 card.addEventListener('click', flipCard);
                 grid.appendChild(card);
             });
+            // Re-fetch card elements after creation
+            cards = document.querySelectorAll('.card');
         }
 
         function flipCard() {
+            // Use 'this' reference directly
             if (lockBoard) return;
-            if (this === firstCard) return; // Prevent double clicking same card
+            if (this === firstCard) return; 
 
             if (!gameStarted) {
                 startTimer();
@@ -198,25 +241,36 @@
 
         function checkForMatch() {
             let isMatch = firstCard.dataset.emoji === secondCard.dataset.emoji;
-            isMatch ? disableCards() : unflipCards();
+            isMatch ? handleMatch() : unflipCards();
         }
 
-        function disableCards() {
-            // It's a match! Remove event listeners so they can't be clicked again
-            firstCard.removeEventListener('click', flipCard);
-            secondCard.removeEventListener('click', flipCard);
+        function handleMatch() {
+            lockBoard = true;
+            matchedPairs++;
             
-            resetBoard();
-            
-            // Check for Win (all cards flipped)
-            if (document.querySelectorAll('.flip').length === emojis.length) {
-                clearInterval(timerInterval);
-                setTimeout(() => alert(`You won in ${moves} moves and ${timeEl.innerText}!`), 500);
-            }
+            // Visual Improvement: Add temporary glow/color change before hiding
+            firstCard.style.boxShadow = '0 0 20px #ffeb3b';
+            secondCard.style.boxShadow = '0 0 20px #ffeb3b';
+
+            // Remove event listeners and visually hide after a short delay
+            setTimeout(() => {
+                firstCard.removeEventListener('click', flipCard);
+                secondCard.removeEventListener('click', flipCard);
+                
+                firstCard.classList.add('matched');
+                secondCard.classList.add('matched');
+                
+                resetBoard();
+                
+                // Check for Win (all pairs matched)
+                if (matchedPairs * 2 === emojis.length) {
+                    showWinMessage();
+                }
+            }, 600); // Short delay to let the user see the match/glow
         }
 
         function unflipCards() {
-            lockBoard = true; // Prevent clicking others while waiting
+            lockBoard = true; 
             setTimeout(() => {
                 firstCard.classList.remove('flip');
                 secondCard.classList.remove('flip');
@@ -226,6 +280,9 @@
 
         function resetBoard() {
             [hasFlippedCard, lockBoard] = [false, false];
+            // Clear shadow/glow
+            firstCard.style.boxShadow = '';
+            secondCard.style.boxShadow = '';
             [firstCard, secondCard] = [null, null];
         }
 
@@ -242,10 +299,20 @@
                 let mins = Math.floor(seconds / 60);
                 let secs = seconds % 60;
                 // Format: 00:00
-                timeEl.innerText = 
-                    (mins < 10 ? '0' + mins : mins) + ':' + 
-                    (secs < 10 ? '0' + secs : secs);
+                const formattedTime = (mins < 10 ? '0' + mins : mins) + ':' + (secs < 10 ? '0' + secs : secs);
+                timeEl.innerText = formattedTime;
             }, 1000);
+        }
+
+        function showWinMessage() {
+            clearInterval(timerInterval);
+            finalTimeEl.innerText = timeEl.innerText;
+            finalMovesEl.innerText = moves;
+            winMessageEl.style.display = 'flex';
+        }
+        
+        function hideWinMessage() {
+            winMessageEl.style.display = 'none';
         }
 
         function restartGame() {
@@ -255,6 +322,7 @@
             moveEl.innerText = '0';
             timeEl.innerText = '00:00';
             gameStarted = false;
+            matchedPairs = 0;
             [hasFlippedCard, lockBoard] = [false, false];
             [firstCard, secondCard] = [null, null];
             createBoard();
@@ -262,7 +330,6 @@
 
         // Initialize
         createBoard();
-
     </script>
 </body>
 </html>

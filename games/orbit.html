@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Orbital Guard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Orbital Guard (Optimized)</title>
     <style>
         body {
             background-color: #050510;
@@ -12,31 +12,41 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            height: 100vh;
+            min-height: 100vh; /* Use min-height for better mobile fit */
             color: #fff;
             font-family: 'Segoe UI', sans-serif;
+            touch-action: none; /* Prevents scroll/zoom interference */
         }
 
+        /* Game Container - RESPONSIVE SCALING */
         #game-container {
             position: relative;
             box-shadow: 0 0 50px rgba(0, 100, 255, 0.2);
-            border-radius: 50%; /* Circular container look */
+            border-radius: 50%; 
+            width: 90vw;
+            max-width: 600px;
+            /* Force aspect ratio to 1:1 (square) */
+            height: 90vw;
+            max-height: 600px;
         }
 
         canvas {
             display: block;
             border-radius: 50%;
+            width: 100%;
+            height: 100%;
             background: radial-gradient(circle at center, #1a1a2e 0%, #000 100%);
         }
 
         #ui-layer {
             position: absolute;
-            top: 20px;
+            top: 5%; /* Adjusted for better mobile padding */
             left: 50%;
             transform: translateX(-50%);
-            font-size: 1.5rem;
+            font-size: 1.2rem;
             text-shadow: 0 0 10px #4deeea;
             pointer-events: none;
+            z-index: 10;
         }
 
         #screens {
@@ -48,7 +58,7 @@
         }
 
         h1 {
-            font-size: 3rem;
+            font-size: 2rem; /* Adjusted for mobile */
             margin: 0;
             color: #4deeea;
             text-transform: uppercase;
@@ -56,7 +66,7 @@
             text-shadow: 0 0 20px #4deeea;
         }
 
-        p { color: #aaa; margin-bottom: 20px; }
+        p { color: #aaa; margin-bottom: 20px; font-size: 0.9rem; }
 
         button {
             background: transparent;
@@ -68,6 +78,8 @@
             border-radius: 30px;
             transition: 0.2s;
             text-transform: uppercase;
+             /* Ensure button is easy to tap */
+            -webkit-tap-highlight-color: transparent;
         }
 
         button:hover {
@@ -85,7 +97,29 @@
         }
         .btn-back:hover { color: #fff; }
 
+        /* Health bar (New visual for core health) */
+        #health-bar-container {
+            position: absolute;
+            top: 15%;
+            width: 80%;
+            height: 10px;
+            background: #333;
+            border-radius: 5px;
+            left: 10%;
+            z-index: 10;
+            border: 1px solid #000;
+        }
+
+        #health-bar {
+            height: 100%;
+            width: 100%;
+            background: #4deeea;
+            border-radius: 5px;
+            transition: width 0.3s, background 0.1s;
+        }
+        
         #health-ring {
+            /* Keep original core ring for central focus */
             position: absolute;
             top: 50%; left: 50%;
             width: 60px; height: 60px;
@@ -94,7 +128,6 @@
             box-shadow: 0 0 20px #4deeea;
             background: #4deeea;
             z-index: 1;
-            transition: background 0.2s, transform 0.1s;
         }
     </style>
 </head>
@@ -104,12 +137,16 @@
         <canvas id="gameCanvas" width="600" height="600"></canvas>
         <div id="health-ring"></div>
         
+        <div id="health-bar-container">
+            <div id="health-bar"></div>
+        </div>
+        
         <div id="ui-layer">WAVE: <span id="score">1</span></div>
 
         <div id="screens">
             <div id="start-screen">
                 <h1>Orbital<br>Guard</h1>
-                <p>Use LEFT / RIGHT Arrows to Rotate Shield</p>
+                <p>Tap LEFT / RIGHT half of screen or use Arrows</p>
                 <button onclick="startGame()">Engage Defense</button>
                 <br>
                 <a href="../index.html" class="btn-back">Abort</a>
@@ -123,6 +160,8 @@
             </div>
         </div>
     </div>
+    
+    <div id="touch-controls" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%;"></div>
 
     <script>
         const canvas = document.getElementById('gameCanvas');
@@ -132,13 +171,19 @@
         const startScreen = document.getElementById('start-screen');
         const gameOverScreen = document.getElementById('game-over-screen');
         const healthRing = document.getElementById('health-ring');
+        const healthBar = document.getElementById('health-bar');
+        const touchControls = document.getElementById('touch-controls');
 
+        // Fixed canvas resolution for game logic
+        const CANVAS_SIZE = 600;
+        
         // Game State
         let gameRunning = false;
         let score = 0; // Tracks Waves survived
         let health = 100;
-        let centerX = canvas.width / 2;
-        let centerY = canvas.height / 2;
+        let centerX = CANVAS_SIZE / 2;
+        let centerY = CANVAS_SIZE / 2;
+        let frames = 0;
         
         // Entities
         const shield = {
@@ -152,6 +197,11 @@
         const enemies = [];
         const particles = [];
         
+        // Difficulty Variables
+        let enemyBaseSpeed = 1.0;
+        let enemySpawnChance = 0.02;
+        let damagePerHit = 25; // Base damage
+
         // Input
         const keys = { ArrowLeft: false, ArrowRight: false };
 
@@ -159,7 +209,8 @@
             constructor(speedMultiplier) {
                 this.angle = Math.random() * Math.PI * 2;
                 this.distance = 350; // Spawn outside
-                this.speed = (Math.random() * 1 + 1) * speedMultiplier;
+                // Speed = Base Speed * Difficulty Multiplier * Random factor
+                this.speed = (Math.random() * 1 + 1) * speedMultiplier * enemyBaseSpeed; 
                 this.radius = 8;
                 this.color = '#ff2a6d';
             }
@@ -169,6 +220,7 @@
             }
 
             draw() {
+                // Scaling: The canvas is scaled by CSS, but the drawing coordinates must be 0-600
                 const x = centerX + Math.cos(this.angle) * this.distance;
                 const y = centerY + Math.sin(this.angle) * this.distance;
                 
@@ -205,10 +257,30 @@
             }
         }
 
+        // --- PROGRESSIVE DIFFICULTY ---
+        function updateDifficulty() {
+            // Wave progress is tied to frames (time)
+            if (frames % 600 === 0 && frames > 0) { // Every 10 seconds
+                score++;
+                scoreEl.innerText = score;
+                
+                // Increase Base Speed and Spawn Chance
+                enemyBaseSpeed += 0.05; // 5% speed increase per wave
+                enemySpawnChance = Math.min(0.06, enemySpawnChance + 0.001); // Cap spawn chance at 6%
+                
+                // Increase damage (up to 50 damage per hit)
+                damagePerHit = Math.min(50, 25 + (score * 5)); 
+                
+                // Visual feedback for new wave
+                scoreEl.style.color = '#fff';
+                setTimeout(() => scoreEl.style.color = '#4deeea', 500);
+            }
+        }
+
         function spawnEnemy() {
-            // Spawn rate increases with score
-            if (Math.random() < 0.02 + (score * 0.001)) {
-                enemies.push(new Enemy(1 + (score * 0.1)));
+            if (Math.random() < enemySpawnChance) {
+                // Pass the current wave score as a speed multiplier for extra randomization
+                enemies.push(new Enemy(1 + (score * 0.05))); 
             }
         }
 
@@ -216,25 +288,21 @@
             for (let i = 0; i < enemies.length; i++) {
                 let e = enemies[i];
                 
-                // 1. Check Shield Collision
-                // If enemy distance is roughly equal to shield radius
+                // 1. Check Shield Collision (Logic unchanged, still robust)
                 if (e.distance < shield.radius + 10 && e.distance > shield.radius - 10) {
                     
-                    // Normalize angles to 0 - 2PI range for comparison
                     let eAngle = (e.angle % (Math.PI * 2));
                     if (eAngle < 0) eAngle += Math.PI * 2;
                     
                     let sAngle = (shield.angle % (Math.PI * 2));
                     if (sAngle < 0) sAngle += Math.PI * 2;
 
-                    // Calculate difference
                     let diff = Math.abs(eAngle - sAngle);
-                    if (diff > Math.PI) diff = (Math.PI * 2) - diff; // Handle wrap-around case
+                    if (diff > Math.PI) diff = (Math.PI * 2) - diff; 
 
-                    // Check if within arc
                     if (diff < shield.arcLength / 2) {
                         // HIT SHIELD
-                        createExplosion(e.distance, e.angle, '#4deeea');
+                        createExplosion(e.distance, e.angle, shield.color);
                         enemies.splice(i, 1);
                         i--;
                         continue;
@@ -244,10 +312,10 @@
                 // 2. Check Core Collision
                 if (e.distance <= 30) {
                     // HIT CORE
-                    createExplosion(30, e.angle, '#ff2a6d');
+                    createExplosion(30, e.angle, e.color);
                     enemies.splice(i, 1);
                     i--;
-                    damageCore();
+                    damageCore(damagePerHit); // Use dynamic damage
                 }
             }
         }
@@ -260,16 +328,25 @@
             }
         }
 
-        function damageCore() {
-            health -= 25;
-            // Visual Shake
+        function damageCore(amount) {
+            health -= amount;
+            health = Math.max(0, health);
+            
+            // Update Health Bar
+            healthBar.style.width = health + '%';
+            
+            // Visual Shake & Color change
             document.body.style.transform = `translate(${Math.random()*10-5}px, ${Math.random()*10-5}px)`;
-            setTimeout(() => document.body.style.transform = 'none', 50);
-
-            // Change Core Color
+            
+            // Set temporary red warning colors
+            healthBar.style.background = '#ff2a6d';
             healthRing.style.background = '#ff2a6d';
             healthRing.style.boxShadow = '0 0 20px #ff2a6d';
+            
             setTimeout(() => {
+                document.body.style.transform = 'none';
+                // Reset to normal colors
+                healthBar.style.background = '#4deeea';
                 healthRing.style.background = '#4deeea';
                 healthRing.style.boxShadow = '0 0 20px #4deeea';
             }, 200);
@@ -283,8 +360,8 @@
             if (!gameRunning) return;
 
             // Clear Canvas
-            ctx.fillStyle = 'rgba(5, 5, 16, 0.3)'; // Trail effect
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'rgba(5, 5, 16, 0.3)'; 
+            ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
 
             // Draw Radar Grid
             ctx.strokeStyle = '#1a1a2e';
@@ -322,15 +399,7 @@
             });
 
             checkCollisions();
-            
-            // Score based on time/frames (simulated "Waves")
-            if (frames % 600 === 0 && frames > 0) {
-                score++;
-                scoreEl.innerText = score;
-                // Flash wave text
-                scoreEl.style.color = '#fff';
-                setTimeout(() => scoreEl.style.color = '#4deeea', 500);
-            }
+            updateDifficulty(); // Update difficulty per frame
 
             frames++;
             requestAnimationFrame(update);
@@ -342,9 +411,16 @@
             health = 100;
             score = 1;
             frames = 0;
+            
+            // Reset Difficulty
+            enemyBaseSpeed = 1.0;
+            enemySpawnChance = 0.02;
+            damagePerHit = 25; 
+            
             gameRunning = true;
             
             scoreEl.innerText = score;
+            healthBar.style.width = '100%';
             startScreen.style.display = 'none';
             gameOverScreen.style.display = 'none';
             healthRing.style.display = 'block';
@@ -356,20 +432,64 @@
             gameRunning = false;
             finalScoreEl.innerText = score;
             gameOverScreen.style.display = 'block';
-            healthRing.style.display = 'none';
+            // Keep the health ring visible but maybe fade it out visually
         }
 
-        // Controls
+        // --- CONTROLS ---
+
+        // 1. Desktop Keyboard (unchanged)
         window.addEventListener('keydown', (e) => {
             if (keys.hasOwnProperty(e.code)) keys[e.code] = true;
         });
         window.addEventListener('keyup', (e) => {
             if (keys.hasOwnProperty(e.code)) keys[e.code] = false;
         });
+        
+        // 2. Mobile Touch Controls
+        let tapInterval;
+        
+        function handleTouchStart(e) {
+            e.preventDefault();
+            if (!gameRunning) return;
+            
+            const touchX = e.touches[0].clientX;
+            const screenWidth = window.innerWidth;
+            
+            // Determine side of the screen tapped
+            if (touchX < screenWidth / 2) {
+                keys.ArrowLeft = true;
+                keys.ArrowRight = false;
+            } else {
+                keys.ArrowLeft = false;
+                keys.ArrowRight = true;
+            }
+            
+            // Use tapInterval for sustained movement on touch-hold
+            tapInterval = setInterval(() => {
+                if (!gameRunning) {
+                    clearInterval(tapInterval);
+                    return;
+                }
+                // Shield rotation is handled by checking keys.ArrowLeft/Right in the update loop
+            }, 50); 
+        }
+
+        function handleTouchEnd(e) {
+            e.preventDefault();
+            keys.ArrowLeft = false;
+            keys.ArrowRight = false;
+            if (tapInterval) clearInterval(tapInterval);
+        }
+
+        // Attach touch listeners to the entire screen/touch-controls div
+        touchControls.addEventListener('touchstart', handleTouchStart);
+        touchControls.addEventListener('touchend', handleTouchEnd);
+        touchControls.addEventListener('touchcancel', handleTouchEnd);
+
 
         // Initial Draw
         ctx.fillStyle = '#050510';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
 
     </script>
 </body>

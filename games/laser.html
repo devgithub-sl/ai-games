@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Laser Logic (Optimized)</title>
     <style>
         body {
@@ -15,28 +15,43 @@
             justify-content: center;
             min-height: 100vh;
             margin: 0;
-            user-select: none; /* Prevents highlighting text while clicking fast */
+            user-select: none; 
+            touch-action: none; /* Crucial for mobile performance */
         }
 
-        h1 { margin-bottom: 10px; color: #f44336; text-shadow: 0 0 10px #f44336; }
+        h1 { margin-bottom: 10px; color: #f44336; text-shadow: 0 0 10px #f44336; font-size: 1.5rem; }
 
+        /* Game Container - RESPONSIVE SCALING */
         #game-container {
             position: relative;
             box-shadow: 0 0 20px rgba(0,0,0,0.5);
             border: 3px solid #444;
             background: #111;
+            
+            /* Use viewport units for scaling */
+            width: 90vw;
+            max-width: 600px;
+            /* Calculate height based on 600/400 ratio */
+            height: calc(90vw * 400 / 600);
+            max-height: 400px;
         }
 
-        canvas { display: block; cursor: pointer; }
+        canvas { 
+            display: block; 
+            cursor: pointer; 
+            width: 100%; /* Fill container */
+            height: 100%;
+        }
 
         #level-info {
             position: absolute;
-            top: 10px; left: 10px;
-            font-size: 1.2rem;
+            top: 5px; left: 5px;
+            font-size: 1rem;
             pointer-events: none;
             background: rgba(0,0,0,0.5);
             padding: 5px 10px;
             border-radius: 4px;
+            z-index: 10;
         }
 
         #win-overlay {
@@ -47,11 +62,11 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            z-index: 10;
+            z-index: 20;
         }
 
         .win-text {
-            font-size: 3rem;
+            font-size: 2rem;
             color: #4CAF50;
             text-shadow: 0 0 20px #4CAF50;
             margin-bottom: 20px;
@@ -66,6 +81,8 @@
             cursor: pointer;
             margin: 5px;
             border-radius: 4px;
+            /* Ensure buttons are easy to tap */
+            -webkit-tap-highlight-color: transparent; 
         }
         button:hover { background: #444; border-color: #aaa; }
         .btn-next { background: #4CAF50; border-color: #4CAF50; color: black; font-weight: bold; }
@@ -99,13 +116,13 @@
         const levelNumEl = document.getElementById('level-num');
         const winOverlay = document.getElementById('win-overlay');
 
-        const gridSize = 60; // 10x10 grid
+        const gridSize = 60; 
         const cols = canvas.width / gridSize;
         const rows = canvas.height / gridSize;
 
-        // --- Game Assets ---
+        // --- Game Assets/Types ---
         // 0=Empty, 1=Emitter(Right), 2=Target, 3=Wall, 
-        // 4=Mirror(/), 5=Mirror(\)
+        // 4=Mirror(/), 5=Mirror(\), 6=Prism(Splitter)
         
         const levels = [
             // Level 1: Simple reflection
@@ -132,7 +149,7 @@
                 [3,0,0,0,0,0,0,0,2,3],
                 [3,3,3,3,3,3,3,3,3,3]
             ],
-            // Level 3: The Zig Zag
+            // Level 3: Zig Zag
             [
                 [3,3,3,3,3,3,3,3,3,3],
                 [3,0,0,0,0,0,0,0,2,3],
@@ -143,95 +160,164 @@
                 [3,0,5,0,4,0,5,0,0,3],
                 [1,0,0,0,0,0,0,0,0,3],
                 [3,3,3,3,3,3,3,3,3,3]
+            ],
+            // Level 4: Introduction to Prism (Type 6)
+            [
+                [3,3,3,3,3,3,3,3,3,3],
+                [1,0,0,0,0,0,0,0,0,3],
+                [3,0,0,6,0,0,0,0,0,3], 
+                [3,0,0,0,0,0,0,0,0,3],
+                [3,0,0,4,0,0,0,0,0,3],
+                [3,0,0,0,0,0,0,0,0,3],
+                [3,2,0,0,0,0,0,0,2,3], /* Two targets */
+                [3,0,0,0,0,0,0,0,0,3],
+                [3,3,3,3,3,3,3,3,3,3]
+            ],
+            // Level 5: Complex Prism
+            [
+                [3,3,3,3,3,3,3,3,3,3],
+                [3,0,0,0,0,0,0,0,2,3], 
+                [1,0,0,5,0,0,6,0,0,3], 
+                [3,0,3,3,3,3,0,3,3,3], 
+                [3,0,0,4,0,0,4,0,0,3],
+                [3,0,3,3,3,3,0,3,3,3],
+                [3,2,0,0,0,0,0,0,0,3], 
+                [3,0,0,0,0,0,0,0,0,3],
+                [3,3,3,3,3,3,3,3,3,3]
             ]
         ];
 
         let currentLevel = 0;
         let grid = [];
-        let emitter = {c:0, r:0, dir:{x:1, y:0}};
-        let laserPoints = []; // Stores just X,Y coordinates for drawing
+        let emitter = {c:0, r:0, dir:{x:1, y:0}}; 
+        let targetsHit = 0;
+        let requiredTargets = 0;
+        let laserPaths = []; 
         let levelWon = false;
+        
+        // --- NEW TRACKERS ---
+        let targetPositions = []; // Store {c, r} of all targets
+        let targetStates = []; // Store hit state (true/false) for each target
+        
+        let initialGrid = [];
 
         function loadLevel(lvlIdx) {
             if(lvlIdx >= levels.length) {
-                alert("All Systems Operational! Game Completed.");
+                alert("All Systems Operational! Game Completed. Restarting.");
                 currentLevel = 0;
             }
             
-            // Deep copy the level data
-            grid = JSON.parse(JSON.stringify(levels[currentLevel]));
+            initialGrid = JSON.parse(JSON.stringify(levels[currentLevel]));
+            grid = JSON.parse(JSON.stringify(initialGrid));
+
             levelNumEl.innerText = currentLevel + 1;
             winOverlay.style.display = 'none';
             levelWon = false;
+            targetsHit = 0;
+            requiredTargets = 0;
+            targetPositions = [];
+            targetStates = [];
             
-            // Find Emitter position
+            // Find Emitter and count Targets
             for(let r=0; r<rows; r++) {
                 for(let c=0; c<cols; c++) {
                     if(grid[r][c] === 1) emitter = {c:c, r:r, dir:{x:1, y:0}};
+                    if(grid[r][c] === 2) {
+                        requiredTargets++;
+                        targetPositions.push({c: c, r: r}); // Store position
+                        targetStates.push(false); // Initialize state to false
+                    }
                 }
             }
             
-            // Initial Calculation
             calculateLaser();
             draw();
         }
-
+        
+        // --- Core Laser Calculation Logic ---
         function calculateLaser() {
-            laserPoints = [];
+            laserPaths = [];
+            targetsHit = 0;
+            // Reset ALL target hit states before tracing
+            targetStates = targetStates.map(() => false);
             
-            // Start at center of emitter tile
-            let c = emitter.c;
-            let r = emitter.r;
-            let dx = emitter.dir.x;
-            let dy = emitter.dir.y;
+            // The laser starts as a single beam
+            traceBeam({c: emitter.c, r: emitter.r, dx: emitter.dir.x, dy: emitter.dir.y});
             
-            // Push start point (Pixel coordinates)
-            laserPoints.push({ x: c * gridSize + gridSize/2, y: r * gridSize + gridSize/2 });
+            // Count actual hits
+            targetsHit = targetStates.filter(state => state).length;
+            
+            // Check win condition
+            if (targetsHit === requiredTargets && requiredTargets > 0) {
+                levelWon = true;
+                winOverlay.style.display = 'flex';
+            } else {
+                levelWon = false;
+                winOverlay.style.display = 'none';
+            }
+        }
 
-            // Max steps to prevent infinite loops
+        // Recursive function to trace a single laser beam
+        function traceBeam(start) {
+            let c = start.c;
+            let r = start.r;
+            let dx = start.dx;
+            let dy = start.dy;
+            
+            let path = [];
+            
+            path.push({ x: c * gridSize + gridSize/2, y: r * gridSize + gridSize/2 });
+
             for(let i=0; i<50; i++) {
-                // Move to next tile
                 c += dx;
                 r += dy;
-
-                // Check bounds
+                
                 if(c < 0 || c >= cols || r < 0 || r >= rows) break;
+                
+                path.push({ x: c * gridSize + gridSize/2, y: r * gridSize + gridSize/2 });
 
-                // Add point to path
-                laserPoints.push({ x: c * gridSize + gridSize/2, y: r * gridSize + gridSize/2 });
-
-                // Check collision
                 const tile = grid[r][c];
 
                 if (tile === 2) { // Target
-                    levelWon = true;
-                    winOverlay.style.display = 'flex';
+                    // Find which target was hit and mark its state
+                    const targetIndex = targetPositions.findIndex(pos => pos.c === c && pos.r === r);
+                    if (targetIndex !== -1) {
+                        targetStates[targetIndex] = true;
+                    }
                     break; 
                 }
                 else if (tile === 3 || tile === 1) { // Wall or Emitter
-                    // Step back slightly for visual overlap, then stop
                     break;
                 }
-                else if (tile === 4) { // Mirror /
-                    // If moving right (1,0) -> Up (0,-1)
-                    // If moving left (-1,0) -> Down (0,1)
-                    // If moving down (0,1) -> Left (-1,0)
-                    // If moving up (0,-1) -> Right (1,0)
-                    // Formula: dx_new = -dy, dy_new = -dx
+                else if (tile === 4) { // Mirror / (dx_new = -dy, dy_new = -dx)
                     let temp = dx;
                     dx = -dy;
                     dy = -temp;
                 }
-                else if (tile === 5) { // Mirror \
-                    // If moving right (1,0) -> Down (0,1)
-                    // Formula: dx_new = dy, dy_new = dx
+                else if (tile === 5) { // Mirror \ (dx_new = dy, dy_new = dx)
                     let temp = dx;
                     dx = dy;
                     dy = temp;
                 }
+                else if (tile === 6) { // PRISM (SPLITTER)
+                    if (dx !== 0) {
+                        traceBeam({c: c, r: r, dx: 0, dy: 1});
+                        traceBeam({c: c, r: r, dx: 0, dy: -1});
+                    } 
+                    else if (dy !== 0) {
+                        traceBeam({c: c, r: r, dx: 1, dy: 0});
+                        traceBeam({c: c, r: r, dx: -1, dy: 0});
+                    }
+                    break;
+                }
+            }
+            
+            if(path.length > 1) {
+                laserPaths.push(path);
             }
         }
-
+        
+        // --- Drawing Functions ---
         function draw() {
             // 1. Clear Screen
             ctx.fillStyle = '#111';
@@ -246,6 +332,7 @@
             ctx.stroke();
 
             // 3. Draw Tiles
+            let targetIndexCounter = 0;
             for(let r=0; r<rows; r++) {
                 for(let c=0; c<cols; c++) {
                     const type = grid[r][c];
@@ -260,92 +347,121 @@
                         ctx.fillStyle = '#f44336'; 
                         ctx.beginPath(); ctx.arc(x+gridSize-10, y+gridSize/2, 8, 0, Math.PI*2); ctx.fill();
                     } else if (type === 2) { // Target
-                        ctx.fillStyle = '#333'; ctx.fillRect(x+1, y+1, gridSize-2, gridSize-2);
-                        ctx.fillStyle = '#4CAF50'; 
-                        ctx.beginPath(); ctx.arc(x+gridSize/2, y+gridSize/2, 12, 0, Math.PI*2); ctx.fill();
-                        // Glow ring
-                        ctx.strokeStyle = '#fff'; ctx.lineWidth=2; 
-                        ctx.beginPath(); ctx.arc(x+gridSize/2, y+gridSize/2, 16, 0, Math.PI*2); ctx.stroke();
-                    } else if (type === 4) { // Mirror /
-                        drawMirror(x, y, '/');
-                    } else if (type === 5) { // Mirror \
-                        drawMirror(x, y, '\\');
+                        // *** FIX HERE: Pass the specific hit state ***
+                        drawTarget(x, y, targetStates[targetIndexCounter]);
+                        targetIndexCounter++; // Move to next target state
+                    } else if (type === 4 || type === 5) { // Mirrors
+                        drawMirror(x, y, type === 4 ? '/' : '\\');
+                    } else if (type === 6) { // Prism (Splitter)
+                        drawPrism(x, y);
                     }
                 }
             }
 
-            // 4. Draw Laser
-            if(laserPoints.length > 1) {
-                ctx.strokeStyle = '#f44336';
-                ctx.lineWidth = 5;
-                ctx.lineCap = 'round';
-                ctx.lineJoin = 'round';
-                
-                // Outer Glow
-                ctx.shadowBlur = 20;
-                ctx.shadowColor = '#f00';
-                
-                ctx.beginPath();
-                ctx.moveTo(laserPoints[0].x, laserPoints[0].y);
-                for(let i=1; i<laserPoints.length; i++) {
-                    ctx.lineTo(laserPoints[i].x, laserPoints[i].y);
+            // 4. Draw Lasers (unchanged)
+            laserPaths.forEach(path => {
+                if(path.length > 1) {
+                    // Outer Glow
+                    ctx.shadowBlur = 20;
+                    ctx.shadowColor = '#f00';
+                    ctx.strokeStyle = '#f44336';
+                    ctx.lineWidth = 5;
+                    ctx.lineCap = 'round';
+                    ctx.lineJoin = 'round';
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(path[0].x, path[0].y);
+                    for(let i=1; i<path.length; i++) {
+                        ctx.lineTo(path[i].x, path[i].y);
+                    }
+                    ctx.stroke();
+                    
+                    // Inner White Core (for "hot" look)
+                    ctx.shadowBlur = 0;
+                    ctx.strokeStyle = '#fff';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(path[0].x, path[0].y);
+                    for(let i=1; i<path.length; i++) {
+                        ctx.lineTo(path[i].x, path[i].y);
+                    }
+                    ctx.stroke();
                 }
-                ctx.stroke();
-                
-                // Inner White Core (for "hot" look)
-                ctx.shadowBlur = 0;
-                ctx.strokeStyle = '#fff';
-                ctx.lineWidth = 2;
-                ctx.beginPath();
-                ctx.moveTo(laserPoints[0].x, laserPoints[0].y);
-                for(let i=1; i<laserPoints.length; i++) {
-                    ctx.lineTo(laserPoints[i].x, laserPoints[i].y);
-                }
-                ctx.stroke();
-            }
+            });
         }
 
         function drawMirror(x, y, type) {
             ctx.fillStyle = '#1a1a1a'; ctx.fillRect(x+2, y+2, gridSize-4, gridSize-4);
             
-            // Mirror frame
             ctx.strokeStyle = '#555';
             ctx.lineWidth = 4;
             ctx.beginPath();
             
-            // Mirror Surface
-            const surfaceColor = '#00bcd4'; // Cyan
+            const surfaceColor = '#00bcd4'; 
             
             if(type === '/') {
-                // Diagonal /
                 ctx.moveTo(x+10, y+gridSize-10); ctx.lineTo(x+gridSize-10, y+10);
                 ctx.stroke();
                 
-                // Surface
                 ctx.strokeStyle = surfaceColor;
                 ctx.beginPath();
                 ctx.moveTo(x+8, y+gridSize-12); ctx.lineTo(x+gridSize-12, y+8);
                 ctx.stroke();
             } else {
-                // Diagonal \
                 ctx.moveTo(x+10, y+10); ctx.lineTo(x+gridSize-10, y+gridSize-10);
                 ctx.stroke();
                 
-                // Surface
                 ctx.strokeStyle = surfaceColor;
                 ctx.beginPath();
                 ctx.moveTo(x+12, y+8); ctx.lineTo(x+gridSize-8, y+gridSize-12);
                 ctx.stroke();
             }
         }
+        
+        function drawPrism(x, y) {
+            ctx.fillStyle = '#1a1a1a'; ctx.fillRect(x+2, y+2, gridSize-4, gridSize-4);
+            
+            ctx.fillStyle = '#8bc34a'; // Green/Glass color
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 3;
+            
+            // Draw a triangle for the prism look
+            ctx.beginPath();
+            ctx.moveTo(x + 10, y + gridSize - 10);
+            ctx.lineTo(x + gridSize - 10, y + gridSize - 10);
+            ctx.lineTo(x + gridSize / 2, y + 10);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+        }
+        
+        function drawTarget(x, y, hit) {
+            ctx.fillStyle = '#333'; ctx.fillRect(x+1, y+1, gridSize-2, gridSize-2);
+            
+            const color = hit ? '#4CAF50' : '#888';
+            
+            ctx.fillStyle = color; 
+            ctx.beginPath(); ctx.arc(x+gridSize/2, y+gridSize/2, 12, 0, Math.PI*2); ctx.fill();
+            
+            ctx.strokeStyle = hit ? '#fff' : '#888'; ctx.lineWidth=2; 
+            ctx.beginPath(); ctx.arc(x+gridSize/2, y+gridSize/2, 16, 0, Math.PI*2); ctx.stroke();
+        }
 
-        // Input Handling
-        canvas.addEventListener('mousedown', (e) => {
+        // --- Input Handling (Mobile Optimized) ---
+        
+        function rotateTile(clientX, clientY) {
             if(levelWon) return;
 
             const rect = canvas.getBoundingClientRect();
-            const c = Math.floor((e.clientX - rect.left) / gridSize);
-            const r = Math.floor((e.clientY - rect.top) / gridSize);
+            
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            
+            const canvasX = (clientX - rect.left) * scaleX;
+            const canvasY = (clientY - rect.top) * scaleY;
+
+            const c = Math.floor(canvasX / gridSize);
+            const r = Math.floor(canvasY / gridSize);
 
             if(c < 0 || c >= cols || r < 0 || r >= rows) return;
 
@@ -362,17 +478,36 @@
 
             if(changed) {
                 calculateLaser();
-                draw(); // Only redraw on click
+                draw(); 
+            }
+        }
+
+        // 1. Desktop Click
+        canvas.addEventListener('mousedown', (e) => {
+            if (e.target.tagName !== 'CANVAS') return;
+            rotateTile(e.clientX, e.clientY);
+        });
+
+        // 2. Mobile Tap/Touch
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault(); 
+            
+            if (e.touches.length > 0) {
+                rotateTile(e.touches[0].clientX, e.touches[0].clientY);
             }
         });
 
+
+        // --- Control Functions ---
         function nextLevel() {
             currentLevel++;
             loadLevel(currentLevel);
         }
 
         function resetLevel() {
-            loadLevel(currentLevel);
+            grid = JSON.parse(JSON.stringify(initialGrid));
+            calculateLaser();
+            draw();
         }
 
         // Init
